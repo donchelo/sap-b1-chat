@@ -11,10 +11,8 @@ const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:410
 const DEFAULT_API_KEY = process.env.NEXT_PUBLIC_SAP_API_KEY ?? ""
 
 export default function ChatPage() {
-  const [apiKey, setApiKey] = useState("")
-  const [keyInput, setKeyInput] = useState("")
+  const [apiKey] = useState(DEFAULT_API_KEY)
   const [tenantName, setTenantName] = useState("")
-  const [loginError, setLoginError] = useState("")
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState("")
   const [loading, setLoading] = useState(false)
@@ -22,56 +20,18 @@ export default function ChatPage() {
   const bottomRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
-  async function resolveKey(k: string): Promise<string | null> {
-    try {
-      const res = await fetch(`${BACKEND_URL}/api/v1/me`, {
-        headers: { "X-API-Key": k },
-      })
-      if (!res.ok) return null
-      const data = await res.json()
-      return data.name ?? data.tenant ?? null
-    } catch {
-      return null
-    }
-  }
-
   useEffect(() => {
-    async function init() {
-      const k = DEFAULT_API_KEY || localStorage.getItem("sap_chat_api_key") || ""
-      if (!k) return
-      const name = await resolveKey(k)
-      if (name) { setApiKey(k); setTenantName(name) }
-      else if (DEFAULT_API_KEY) { setApiKey(k) } // fallback sin nombre si el backend no responde
-    }
-    init()
+    if (!apiKey) return
+    fetch(`${BACKEND_URL}/api/v1/me`, { headers: { "X-API-Key": apiKey } })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => { if (data) setTenantName(data.name ?? data.tenant ?? "") })
+      .catch(() => {})
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [messages, loading])
-
-  async function saveKey() {
-    const k = keyInput.trim()
-    if (!k) return
-    setLoginError("")
-    const name = await resolveKey(k)
-    if (!name) {
-      setLoginError("API key inválida o el backend no responde.")
-      return
-    }
-    localStorage.setItem("sap_chat_api_key", k)
-    setApiKey(k)
-    setTenantName(name)
-    setKeyInput("")
-  }
-
-  function clearKey() {
-    localStorage.removeItem("sap_chat_api_key")
-    setApiKey("")
-    setTenantName("")
-    setMessages([])
-  }
 
   async function sendMessage() {
     const text = input.trim()
@@ -125,35 +85,6 @@ export default function ChatPage() {
     }
   }
 
-  if (!apiKey) {
-    return (
-      <main style={styles.center}>
-        <div style={styles.loginBox}>
-          <h2 style={{ margin: "0 0 8px", fontSize: 20 }}>SAP B1 — Asistente</h2>
-          <p style={{ margin: "0 0 20px", color: "#666", fontSize: 14 }}>
-            Ingresa tu API key del gateway SAP (<code>TAMAPRINT_API_KEY</code> o{" "}
-            <code>FLEXOIMPRESOS_API_KEY</code>).
-          </p>
-          <input
-            type="password"
-            placeholder="API key"
-            value={keyInput}
-            onChange={(e) => setKeyInput(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && saveKey()}
-            style={styles.keyInput}
-            autoFocus
-          />
-          {loginError && (
-            <p style={{ color: "#cc0000", fontSize: 13, margin: "0 0 10px" }}>{loginError}</p>
-          )}
-          <button onClick={saveKey} style={styles.primaryBtn}>
-            Entrar
-          </button>
-        </div>
-      </main>
-    )
-  }
-
   return (
     <main style={styles.layout}>
       <header style={styles.header}>
@@ -165,11 +96,6 @@ export default function ChatPage() {
           <button onClick={() => setMessages([])} style={styles.ghostBtn}>
             Nueva conversación
           </button>
-          {!DEFAULT_API_KEY && (
-            <button onClick={clearKey} style={styles.ghostBtn}>
-              Salir
-            </button>
-          )}
         </div>
       </header>
 
@@ -364,32 +290,6 @@ function MarkdownContent({ text }: { text: string }) {
 }
 
 const styles: Record<string, React.CSSProperties> = {
-  center: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    minHeight: "100vh",
-    background: "#f5f5f5",
-    fontFamily: "system-ui, sans-serif",
-  },
-  loginBox: {
-    background: "#fff",
-    borderRadius: 12,
-    padding: "32px 36px",
-    boxShadow: "0 2px 16px rgba(0,0,0,0.10)",
-    minWidth: 340,
-    maxWidth: 420,
-  },
-  keyInput: {
-    width: "100%",
-    padding: "8px 12px",
-    border: "1px solid #ddd",
-    borderRadius: 8,
-    fontSize: 14,
-    marginBottom: 12,
-    boxSizing: "border-box",
-    fontFamily: "monospace",
-  },
   layout: {
     display: "flex",
     flexDirection: "column",
