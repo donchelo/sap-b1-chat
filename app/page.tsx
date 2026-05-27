@@ -13,6 +13,8 @@ const DEFAULT_API_KEY = process.env.NEXT_PUBLIC_SAP_API_KEY ?? ""
 export default function ChatPage() {
   const [apiKey, setApiKey] = useState("")
   const [keyInput, setKeyInput] = useState("")
+  const [tenantName, setTenantName] = useState("")
+  const [loginError, setLoginError] = useState("")
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState("")
   const [loading, setLoading] = useState(false)
@@ -20,30 +22,54 @@ export default function ChatPage() {
   const bottomRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
-  useEffect(() => {
-    if (DEFAULT_API_KEY) {
-      setApiKey(DEFAULT_API_KEY)
-      return
+  async function resolveKey(k: string): Promise<string | null> {
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/v1/me`, {
+        headers: { "X-API-Key": k },
+      })
+      if (!res.ok) return null
+      const data = await res.json()
+      return data.name ?? data.tenant ?? null
+    } catch {
+      return null
     }
-    const saved = localStorage.getItem("sap_chat_api_key")
-    if (saved) setApiKey(saved)
+  }
+
+  useEffect(() => {
+    async function init() {
+      const k = DEFAULT_API_KEY || localStorage.getItem("sap_chat_api_key") || ""
+      if (!k) return
+      const name = await resolveKey(k)
+      if (name) { setApiKey(k); setTenantName(name) }
+      else if (DEFAULT_API_KEY) { setApiKey(k) } // fallback sin nombre si el backend no responde
+    }
+    init()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [messages, loading])
 
-  function saveKey() {
+  async function saveKey() {
     const k = keyInput.trim()
     if (!k) return
+    setLoginError("")
+    const name = await resolveKey(k)
+    if (!name) {
+      setLoginError("API key inválida o el backend no responde.")
+      return
+    }
     localStorage.setItem("sap_chat_api_key", k)
     setApiKey(k)
+    setTenantName(name)
     setKeyInput("")
   }
 
   function clearKey() {
     localStorage.removeItem("sap_chat_api_key")
     setApiKey("")
+    setTenantName("")
     setMessages([])
   }
 
@@ -117,6 +143,9 @@ export default function ChatPage() {
             style={styles.keyInput}
             autoFocus
           />
+          {loginError && (
+            <p style={{ color: "#cc0000", fontSize: 13, margin: "0 0 10px" }}>{loginError}</p>
+          )}
           <button onClick={saveKey} style={styles.primaryBtn}>
             Entrar
           </button>
@@ -128,7 +157,9 @@ export default function ChatPage() {
   return (
     <main style={styles.layout}>
       <header style={styles.header}>
-        <span style={{ fontWeight: 600, fontSize: 16 }}>SAP B1 — Asistente</span>
+        <span style={{ fontWeight: 600, fontSize: 16 }}>
+          {tenantName ? `${tenantName} — SAP B1` : "SAP B1 — Asistente"}
+        </span>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <span style={{ fontSize: 12, color: "#888" }}>{BACKEND_URL}</span>
           <button onClick={() => setMessages([])} style={styles.ghostBtn}>
