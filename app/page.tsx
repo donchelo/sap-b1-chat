@@ -405,8 +405,17 @@ function ChatUI({ apiKey }: { apiKey: string }) {
 
           {error && (
             <div style={ss.errorBox}>
-              {error.message}
-              <button onClick={clearError} style={ss.errorClose}>✕</button>
+              <span style={{ flex: 1 }}>{error.message}</span>
+              <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+                <button
+                  onClick={() => { clearError(); regenerate() }}
+                  style={{ ...ss.errorClose, fontWeight: 500 }}
+                  title="Reintentar la última consulta"
+                >
+                  ↺ Reintentar
+                </button>
+                <button onClick={clearError} style={ss.errorClose}>✕</button>
+              </div>
             </div>
           )}
 
@@ -423,11 +432,15 @@ function ChatUI({ apiKey }: { apiKey: string }) {
             }} />
             <span>
               {status === "submitted"
-                ? submittedElapsed < 3 ? "Conectando al backend…" : "Esperando respuesta de SAP B1…"
+                ? submittedElapsed < 3  ? "Conectando al backend…"
+                : submittedElapsed < 12 ? "Esperando respuesta de SAP B1…"
+                : submittedElapsed < 35 ? `SAP B1 procesando… (${submittedElapsed}s)`
+                : submittedElapsed < 70 ? `Consulta larga en SAP — puede tardar (${submittedElapsed}s)`
+                :                         `Tiempo de espera alto (${submittedElapsed}s) — puedes cancelar`
                 : liveStatusText ?? "Recibiendo respuesta…"}
             </span>
             <span style={{ marginLeft: "auto", opacity: 0.6 }}>
-              Ctrl+Enter para cancelar
+              Usa ■ Detener para cancelar
             </span>
           </div>
         )}
