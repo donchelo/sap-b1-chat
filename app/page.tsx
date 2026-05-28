@@ -152,6 +152,15 @@ function ChatUI({ apiKey }: { apiKey: string }) {
   const isLoading = status === "submitted" || status === "streaming"
 
   const tokenEstimate = useMemo(() => estimateTokens(messages), [messages])
+
+  // Último texto de data-status del backend para el status strip
+  const liveStatusText = useMemo(() => {
+    const lastMsg = [...messages].reverse().find(m => m.role === "assistant")
+    if (!lastMsg) return undefined
+    const sp = lastMsg.parts.filter(p => p.type === "data-status") as Array<{ type: string; data: { text: string } }>
+    return sp.at(-1)?.data?.text
+  }, [messages])
+
   const tokenColor =
     tokenEstimate > CTX_LIMIT ? "var(--ai4u-orange)" :
     tokenEstimate > CTX_WARN  ? "#d97706" :
@@ -391,7 +400,9 @@ function ChatUI({ apiKey }: { apiKey: string }) {
               animation: "pulse 1s ease-in-out infinite",
             }} />
             <span>
-              {status === "submitted" ? "Enviando a SAP B1…" : "Recibiendo respuesta…"}
+              {status === "submitted"
+                ? "Enviando a SAP B1…"
+                : liveStatusText ?? "Recibiendo respuesta…"}
             </span>
             <span style={{ marginLeft: "auto", opacity: 0.6 }}>
               Ctrl+Enter para cancelar
@@ -471,7 +482,15 @@ function SuggestionsPanel({
 }
 
 // ─── ToolCallStep ─────────────────────────────────────────────────────────────
-function ToolCallStep({ part }: { part: ReturnType<typeof useChat>["messages"][number]["parts"][number] }) {
+function ToolCallStep({
+  part,
+  toolStatusText,
+  onRetry,
+}: {
+  part: ReturnType<typeof useChat>["messages"][number]["parts"][number]
+  toolStatusText?: string
+  onRetry?: () => void
+}) {
   const [expanded, setExpanded] = useState(false)
   if (!isToolUIPart(part)) return null
 
@@ -480,7 +499,11 @@ function ToolCallStep({ part }: { part: ReturnType<typeof useChat>["messages"][n
   const inv = part as unknown as {
     state: string
     input?: unknown
-    output?: unknown
+    output?: {
+      sapDuration?: number
+      error?: { code?: string; message?: string; retryable?: boolean }
+      [k: string]: unknown
+    }
     errorText?: string
   }
 
@@ -489,6 +512,10 @@ function ToolCallStep({ part }: { part: ReturnType<typeof useChat>["messages"][n
   const isPending = !isDone && !isError
   const elapsed   = useElapsed(isPending)
 
+  const sapDuration  = inv.output?.sapDuration
+  const outputError  = inv.output?.error
+  const isRetryable  = outputError?.retryable === true
+
   return (
     <div style={ss.toolStep}>
       <button
@@ -496,27 +523,58 @@ function ToolCallStep({ part }: { part: ReturnType<typeof useChat>["messages"][n
         onClick={() => isDone && setExpanded((v) => !v)}
         disabled={!isDone}
       >
-        <span style={{ color: isError ? "var(--ai4u-orange)" : isDone ? "var(--ai4u-text-secondary)" : "var(--ai4u-cadet-gray)", animation: isPending ? "pulse 1.4s ease-in-out infinite" : undefined }}>
+        <span style={{
+          color: isError ? "var(--ai4u-orange)" : isDone ? "var(--ai4u-text-secondary)" : "var(--ai4u-cadet-gray)",
+          animation: isPending ? "pulse 1.4s ease-in-out infinite" : undefined,
+        }}>
           {isError ? "✗" : isDone ? "✓" : "●"}
         </span>
         <span style={{ flex: 1, textAlign: "left" as const }}>{label}</span>
-        {isPending && elapsed > 0 && (
+
+        {/* Progreso en tiempo real (data-tool-status) */}
+        {isPending && toolStatusText && (
+          <span style={{ fontSize: 10, color: "var(--ai4u-cadet-gray)", fontStyle: "italic", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
+            {toolStatusText}
+          </span>
+        )}
+
+        {/* Cronómetro cuando no hay status text */}
+        {isPending && !toolStatusText && elapsed > 0 && (
           <span style={{ fontSize: 10, color: "var(--ai4u-cadet-gray)", fontFamily: "'Necto Mono', monospace" }}>
             {elapsed}s
           </span>
         )}
+
+        {/* Duración real SAP al completar */}
+        {isDone && sapDuration !== undefined && (
+          <span style={{ fontSize: 10, color: "var(--ai4u-cadet-gray)", fontFamily: "'Necto Mono', monospace" }}>
+            · {(sapDuration / 1000).toFixed(1)}s SAP
+          </span>
+        )}
+
         {isDone && (
           <span style={{ fontSize: 10, color: "var(--ai4u-cadet-gray)" }}>
             {expanded ? "▲" : "▼"}
           </span>
         )}
       </button>
+
       {expanded && isDone && inv.output !== undefined && (
         <pre style={ss.toolOutput}>
           {typeof inv.output === "string" ? inv.output : JSON.stringify(inv.output, null, 2)}
         </pre>
       )}
-      {isError && <div style={ss.toolError}>{inv.errorText}</div>}
+
+      {isError && (
+        <div style={{ ...ss.toolError, display: "flex", alignItems: "center", gap: 8 }}>
+          <span>{outputError?.message ?? inv.errorText}</span>
+          {isRetryable && onRetry && (
+            <button onClick={onRetry} style={{ ...ss.microBtn, color: "var(--ai4u-orange)", flexShrink: 0 }}>
+              ↺ Reintentar
+            </button>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -571,6 +629,22 @@ function MessageBubble({
 
   const toolParts = parts.filter(isToolUIPart)
   const reasoningParts = parts.filter(isReasoningUIPart)
+  const toolStatusByCallId = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const p of parts) {
+      if (p.type === "data-tool-status") {
+        const d = (p as unknown as { data: { toolCallId: string; text: string } }).data
+        if (d?.toolCallId && d?.text) map.set(d.toolCallId, d.text)
+      }
+    }
+    return map
+  }, [parts])
+
+  // Último data-status dentro de este bubble (para reemplazar typing dots)
+  const bubbleStatusText = useMemo(() => {
+    const sp = parts.filter(p => p.type === "data-status") as Array<{ type: string; data: { text: string } }>
+    return sp.at(-1)?.data?.text
+  }, [parts])
 
   return (
     <div
@@ -595,9 +669,17 @@ function MessageBubble({
       {/* Tool calls */}
       {toolParts.length > 0 && (
         <div style={ss.toolStepList}>
-          {toolParts.map((p, i) => (
-            <ToolCallStep key={i} part={p} />
-          ))}
+          {toolParts.map((p, i) => {
+            const callId = (p as unknown as { toolCallId?: string }).toolCallId ?? ""
+            return (
+              <ToolCallStep
+                key={i}
+                part={p}
+                toolStatusText={toolStatusByCallId.get(callId)}
+                onRetry={onRegen}
+              />
+            )
+          })}
         </div>
       )}
 
@@ -605,7 +687,9 @@ function MessageBubble({
       <div style={ss.bubbleContent}>
         {role === "assistant" ? (
           showThinking ? (
-            <div className="typing-dots"><span /><span /><span /></div>
+            bubbleStatusText
+              ? <span style={{ color: "var(--ai4u-cadet-gray)", fontStyle: "italic", fontSize: 13 }}>{bubbleStatusText}</span>
+              : <div className="typing-dots"><span /><span /><span /></div>
           ) : (
             <MarkdownContent text={text} />
           )
