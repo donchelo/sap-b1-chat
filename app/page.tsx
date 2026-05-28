@@ -8,16 +8,26 @@ interface Message {
 }
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:4100"
-const DEFAULT_API_KEY = process.env.NEXT_PUBLIC_SAP_API_KEY ?? ""
 
 function getInitialApiKey(): string {
-  if (typeof window === "undefined") return DEFAULT_API_KEY
-  const param = new URLSearchParams(window.location.search).get("apiKey")
-  return param ?? DEFAULT_API_KEY
+  if (typeof window === "undefined") return ""
+  return new URLSearchParams(window.location.search).get("apiKey") ?? ""
 }
 
 export default function ChatPage() {
   const [apiKey] = useState(getInitialApiKey)
+
+  if (!apiKey) {
+    return (
+      <main style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100vh", background: "var(--ai4u-bg-default)", gap: 16, textAlign: "center", padding: 24 }}>
+        <div style={{ fontSize: 32 }}>🔒</div>
+        <div style={{ fontSize: 18, fontWeight: 600, color: "var(--ai4u-text-primary)" }}>Acceso restringido</div>
+        <div style={{ fontSize: 14, color: "var(--ai4u-text-secondary)", maxWidth: 340 }}>
+          Este asistente solo es accesible desde Mission Control.
+        </div>
+      </main>
+    )
+  }
   const [tenantName, setTenantName] = useState("")
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState("")
