@@ -1,3 +1,5 @@
+import { convertToModelMessages } from "ai"
+
 const BACKEND_URL =
   process.env.BACKEND_URL ??
   process.env.NEXT_PUBLIC_BACKEND_URL ??
@@ -11,19 +13,8 @@ export async function POST(req: Request) {
     return Response.json({ error: "apiKey requerido" }, { status: 401 })
   }
 
-  // UIMessage[] → { role, content } that the backend expects
-  const normalized = (
-    messages as Array<{
-      role: string
-      parts: Array<{ type: string; text?: string }>
-    }>
-  ).map((msg) => ({
-    role: msg.role,
-    content: msg.parts
-      .filter((p) => p.type === "text")
-      .map((p) => p.text ?? "")
-      .join(""),
-  }))
+  // UIMessage[] → ModelMessage[] (preserva tool calls, tool results, etc.)
+  const modelMessages = await convertToModelMessages(messages)
 
   const upstream = await fetch(`${BACKEND_URL}/api/v1/chat`, {
     method: "POST",
@@ -31,7 +22,7 @@ export async function POST(req: Request) {
       "Content-Type": "application/json",
       "X-API-Key": apiKey,
     },
-    body: JSON.stringify({ messages: normalized }),
+    body: JSON.stringify({ messages: modelMessages }),
   })
 
   if (!upstream.ok) {
@@ -42,7 +33,12 @@ export async function POST(req: Request) {
     )
   }
 
-  return new Response(upstream.body, {
-    headers: { "Content-Type": "text/plain; charset=utf-8" },
-  })
+  // Pasar el UI message stream con los headers correctos del upstream
+  const responseHeaders = new Headers()
+  const contentType = upstream.headers.get("Content-Type")
+  if (contentType) responseHeaders.set("Content-Type", contentType)
+  const sessionId = upstream.headers.get("X-Session-Id")
+  if (sessionId) responseHeaders.set("X-Session-Id", sessionId)
+
+  return new Response(upstream.body, { headers: responseHeaders })
 }

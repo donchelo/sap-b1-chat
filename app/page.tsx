@@ -1,22 +1,33 @@
 "use client"
 
 import { useChat } from "@ai-sdk/react"
-import { isTextUIPart, TextStreamChatTransport } from "ai"
+import {
+  DefaultChatTransport,
+  isTextUIPart,
+  isToolUIPart,
+  isReasoningUIPart,
+  getToolName,
+} from "ai"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { MarkdownContent } from "./components/MarkdownContent"
 import { useThreads, type Thread } from "./hooks/useThreads"
 import { useSuggestions } from "./hooks/useSuggestions"
 
-// ─── Chatbot fundamentals — resumen ──────────────────────────────────────────
-//  Tier 1  Streaming · historial · error handling · stop · fix hooks
-//  Tier 2  Auto-resize textarea · Detener btn · Pensando… · Regenerar
-//  Tier 3  Multi-hilo localStorage · título auto · switching · eliminar
-//  Tier 4  Búsqueda en hilos · Rename inline · Copy message · Export .md
-//  Tier 5  Preguntas estratégicas auto-generadas por LLM (cache diaria)
-// ─────────────────────────────────────────────────────────────────────────────
-
 const BACKEND_URL =
   process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:4100"
+
+const TOOL_LABELS: Record<string, string> = {
+  consultar_sql:       "Consultando SQL SAP",
+  obtener_documento:   "Obteniendo documento",
+  listar_registros:    "Listando registros",
+  crear_documento:     "Preparando documento",
+  actualizar_documento: "Actualizando documento",
+  ejecutar_accion:     "Ejecutando acción",
+}
+
+// Context limit: Claude Sonnet 200k tokens. Alert zones:
+const CTX_WARN  = 120_000
+const CTX_LIMIT = 180_000
 
 function getInitialApiKey(): string {
   if (typeof window === "undefined") return ""
@@ -32,7 +43,6 @@ function relativeTime(ts: number): string {
   return new Date(ts).toLocaleDateString("es", { month: "short", day: "numeric" })
 }
 
-// Descarga el hilo activo como archivo Markdown (Tier 4 — 100% frontend)
 function exportAsMarkdown(thread: Thread) {
   const sections = thread.messages.map((msg) => {
     const text = msg.parts.filter(isTextUIPart).map((p) => p.text).join("")
@@ -49,10 +59,18 @@ function exportAsMarkdown(thread: Thread) {
   URL.revokeObjectURL(url)
 }
 
-// ─── Root: sólo gate de acceso ────────────────────────────────────────────────
+// Rough token estimate: ~4 chars per token
+function estimateTokens(msgs: ReturnType<typeof useChat>["messages"]): number {
+  return Math.round(
+    msgs.reduce((sum, msg) =>
+      sum + msg.parts.reduce((s, p) => s + (isTextUIPart(p) ? p.text.length : 60), 0)
+    , 0) / 4
+  )
+}
+
+// ─── Root: gate de acceso ─────────────────────────────────────────────────────
 export default function ChatPage() {
   const [apiKey] = useState(getInitialApiKey)
-
   if (!apiKey) {
     return (
       <main style={ss.lockScreen}>
@@ -66,7 +84,6 @@ export default function ChatPage() {
       </main>
     )
   }
-
   return <ChatUI apiKey={apiKey} />
 }
 
@@ -78,7 +95,6 @@ function ChatUI({ apiKey }: { apiKey: string }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
 
-  // Tier 5: preguntas estratégicas auto-generadas
   const { suggestions, status: sugStatus, refresh: refreshSuggestions } =
     useSuggestions(apiKey)
 
@@ -94,7 +110,7 @@ function ChatUI({ apiKey }: { apiKey: string }) {
   } = useThreads()
 
   const transport = useMemo(
-    () => new TextStreamChatTransport({ api: "/api/chat", body: { apiKey } }),
+    () => new DefaultChatTransport({ api: "/api/chat", body: { apiKey } }),
     [apiKey],
   )
 
@@ -103,11 +119,14 @@ function ChatUI({ apiKey }: { apiKey: string }) {
 
   const isLoading = status === "submitted" || status === "streaming"
 
-  // Filtro de búsqueda (Tier 4) — busca en título y primer mensaje
+  const tokenEstimate = useMemo(() => estimateTokens(messages), [messages])
+  const tokenColor =
+    tokenEstimate > CTX_LIMIT ? "var(--ai4u-orange)" :
+    tokenEstimate > CTX_WARN  ? "#d97706" :
+    "var(--ai4u-cadet-gray)"
+
   const filteredThreads = search.trim()
-    ? threads.filter((t) =>
-        t.title.toLowerCase().includes(search.toLowerCase()),
-      )
+    ? threads.filter((t) => t.title.toLowerCase().includes(search.toLowerCase()))
     : threads
 
   // Cargar mensajes al cambiar de hilo
@@ -173,6 +192,21 @@ function ChatUI({ apiKey }: { apiKey: string }) {
     createThread()
   }
 
+  // Edit message: corta el historial al índice y pone el texto en el input
+  function handleEditMessage(idx: number) {
+    if (isLoading) return
+    const msg = messages[idx]
+    if (!msg || msg.role !== "user") return
+    const text = msg.parts.filter(isTextUIPart).map((p) => p.text).join("")
+    setMessages(messages.slice(0, idx))
+    setInputValue(text)
+    setTimeout(() => {
+      textareaRef.current?.focus()
+      const el = textareaRef.current
+      if (el) { el.selectionStart = el.selectionEnd = el.value.length }
+    }, 30)
+  }
+
   return (
     <div style={ss.root}>
 
@@ -187,7 +221,6 @@ function ChatUI({ apiKey }: { apiKey: string }) {
           </button>
         </div>
 
-        {/* Búsqueda (Tier 4) */}
         <div style={{ padding: "8px 10px 4px" }}>
           <input
             type="search"
@@ -223,16 +256,24 @@ function ChatUI({ apiKey }: { apiKey: string }) {
           <span style={{ fontWeight: 600, fontSize: 15, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {activeThread?.title ?? "SAP B1 — Asistente"}
           </span>
-          {/* Export (Tier 4) */}
-          {activeThread && messages.length > 0 && (
-            <button
-              onClick={() => exportAsMarkdown({ ...activeThread, messages })}
-              style={ss.ghostBtn}
-              title="Exportar hilo como Markdown"
-            >
-              ↓ Exportar
-            </button>
-          )}
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+            {/* Token indicator */}
+            {messages.length > 0 && (
+              <span style={{ fontSize: 11, color: tokenColor, fontFamily: "'Necto Mono', monospace" }}
+                title={`~${tokenEstimate.toLocaleString()} tokens estimados de 200k`}>
+                ~{tokenEstimate > 1000 ? `${Math.round(tokenEstimate / 1000)}k` : tokenEstimate}t
+              </span>
+            )}
+            {activeThread && messages.length > 0 && (
+              <button
+                onClick={() => exportAsMarkdown({ ...activeThread, messages })}
+                style={ss.ghostBtn}
+                title="Exportar hilo como Markdown"
+              >
+                ↓ Exportar
+              </button>
+            )}
+          </div>
         </header>
 
         <div style={ss.messages}>
@@ -246,18 +287,22 @@ function ChatUI({ apiKey }: { apiKey: string }) {
           )}
 
           {messages.map((msg, idx) => {
-            const text = msg.parts.filter(isTextUIPart).map((p) => p.text).join("")
             const isLastAssistant = idx === messages.length - 1 && msg.role === "assistant"
+            const textParts = msg.parts.filter(isTextUIPart)
+            const text = textParts.map((p) => p.text).join("")
             const showThinking = isLastAssistant && !text && status === "streaming"
 
             return (
               <MessageBubble
                 key={msg.id}
                 role={msg.role as "user" | "assistant"}
+                parts={msg.parts}
                 text={text}
                 showThinking={showThinking}
                 showRegen={isLastAssistant && !isLoading && !!text}
                 onRegen={() => regenerate()}
+                onEdit={msg.role === "user" ? () => handleEditMessage(idx) : undefined}
+                isLoading={isLoading}
               />
             )
           })}
@@ -312,7 +357,7 @@ function ChatUI({ apiKey }: { apiKey: string }) {
   )
 }
 
-// ─── SuggestionsPanel (Tier 5: preguntas estratégicas auto-generadas) ────────
+// ─── SuggestionsPanel ────────────────────────────────────────────────────────
 function SuggestionsPanel({
   suggestions,
   loading,
@@ -332,64 +377,118 @@ function SuggestionsPanel({
       <p style={{ fontSize: 12, color: "var(--ai4u-cadet-gray)", marginBottom: 16 }}>
         Generadas por IA · se actualizan cada día
       </p>
-
       {loading ? (
-        /* Skeleton mientras el LLM genera */
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center" }}>
           {[148, 112, 136, 124].map((w) => (
-            <div
-              key={w}
-              style={{
-                width: w,
-                height: 34,
-                borderRadius: 20,
-                background: "var(--ai4u-border-color)",
-                animation: "pulse 1.4s ease-in-out infinite",
-              }}
-            />
+            <div key={w} style={{ width: w, height: 34, borderRadius: 20, background: "var(--ai4u-border-color)", animation: "pulse 1.4s ease-in-out infinite" }} />
           ))}
         </div>
       ) : (
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center" }}>
           {suggestions.map((s) => (
-            <button key={s} style={ss.suggestionBtn} onClick={() => onSelect(s)}>
-              {s}
-            </button>
+            <button key={s} style={ss.suggestionBtn} onClick={() => onSelect(s)}>{s}</button>
           ))}
         </div>
       )}
-
-      <button
-        onClick={onRefresh}
-        disabled={loading}
-        style={{
-          ...ss.microBtn,
-          marginTop: 14,
-          opacity: loading ? 0.4 : 1,
-          cursor: loading ? "default" : "pointer",
-        }}
-      >
+      <button onClick={onRefresh} disabled={loading} style={{ ...ss.microBtn, marginTop: 14, opacity: loading ? 0.4 : 1, cursor: loading ? "default" : "pointer" }}>
         {loading ? "Generando…" : "↺ Regenerar preguntas"}
       </button>
     </div>
   )
 }
 
-// ─── MessageBubble (Tier 4: botón copy por burbuja) ──────────────────────────
+// ─── ToolCallStep ─────────────────────────────────────────────────────────────
+function ToolCallStep({ part }: { part: ReturnType<typeof useChat>["messages"][number]["parts"][number] }) {
+  const [expanded, setExpanded] = useState(false)
+  if (!isToolUIPart(part)) return null
+
+  const name = getToolName(part)
+  const label = TOOL_LABELS[name] ?? name
+  // Access state/output via cast since tools are dynamic
+  const inv = part as unknown as {
+    state: string
+    input?: unknown
+    output?: unknown
+    errorText?: string
+  }
+
+  const isDone  = inv.state === "output-available"
+  const isError = inv.state === "output-error"
+  const isPending = !isDone && !isError
+
+  return (
+    <div style={ss.toolStep}>
+      <button
+        style={ss.toolStepHeader}
+        onClick={() => isDone && setExpanded((v) => !v)}
+        disabled={!isDone}
+      >
+        <span style={{ color: isError ? "var(--ai4u-orange)" : isDone ? "var(--ai4u-text-secondary)" : "var(--ai4u-cadet-gray)" }}>
+          {isError ? "✗" : isDone ? "✓" : "·"}
+        </span>
+        <span style={{ flex: 1, textAlign: "left" as const }}>{label}</span>
+        {isPending && (
+          <span style={{ fontSize: 10, color: "var(--ai4u-cadet-gray)", animation: "pulse 1.4s ease-in-out infinite" }}>
+            …
+          </span>
+        )}
+        {isDone && (
+          <span style={{ fontSize: 10, color: "var(--ai4u-cadet-gray)" }}>
+            {expanded ? "▲" : "▼"}
+          </span>
+        )}
+      </button>
+      {expanded && isDone && inv.output !== undefined && (
+        <pre style={ss.toolOutput}>
+          {typeof inv.output === "string" ? inv.output : JSON.stringify(inv.output, null, 2)}
+        </pre>
+      )}
+      {isError && <div style={ss.toolError}>{inv.errorText}</div>}
+    </div>
+  )
+}
+
+// ─── ReasoningBlock ───────────────────────────────────────────────────────────
+function ReasoningBlock({ text, streaming }: { text: string; streaming?: boolean }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div style={ss.reasoningBlock}>
+      <button style={ss.reasoningToggle} onClick={() => setOpen((v) => !v)}>
+        <span style={{ color: "var(--ai4u-cadet-gray)", fontSize: 10 }}>{open ? "▲" : "▼"}</span>
+        <span>Razonamiento</span>
+        {streaming && (
+          <span style={{ fontSize: 10, color: "var(--ai4u-cadet-gray)", animation: "pulse 1.4s ease-in-out infinite" }}>…</span>
+        )}
+      </button>
+      {open && (
+        <div style={ss.reasoningText}>{text}</div>
+      )}
+    </div>
+  )
+}
+
+// ─── MessageBubble ────────────────────────────────────────────────────────────
 function MessageBubble({
   role,
+  parts,
   text,
   showThinking,
   showRegen,
   onRegen,
+  onEdit,
+  isLoading,
 }: {
   role: "user" | "assistant"
+  parts: ReturnType<typeof useChat>["messages"][number]["parts"]
   text: string
   showThinking: boolean
   showRegen: boolean
   onRegen: () => void
+  onEdit?: () => void
+  isLoading: boolean
 }) {
   const [copied, setCopied] = useState(false)
+  const [hovered, setHovered] = useState(false)
 
   async function copy() {
     await navigator.clipboard.writeText(text)
@@ -397,9 +496,39 @@ function MessageBubble({
     setTimeout(() => setCopied(false), 1500)
   }
 
+  const toolParts = parts.filter(isToolUIPart)
+  const reasoningParts = parts.filter(isReasoningUIPart)
+
   return (
-    <div style={role === "user" ? ss.userBubble : ss.aiBubble}>
+    <div
+      style={role === "user" ? ss.userBubble : ss.aiBubble}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
       <div style={ss.bubbleLabel}>{role === "user" ? "Tú" : "Asistente"}</div>
+
+      {/* Reasoning (extended thinking) */}
+      {reasoningParts.map((p, i) => {
+        if (!isReasoningUIPart(p)) return null
+        return (
+          <ReasoningBlock
+            key={i}
+            text={p.text}
+            streaming={p.state === "streaming"}
+          />
+        )
+      })}
+
+      {/* Tool calls */}
+      {toolParts.length > 0 && (
+        <div style={ss.toolStepList}>
+          {toolParts.map((p, i) => (
+            <ToolCallStep key={i} part={p} />
+          ))}
+        </div>
+      )}
+
+      {/* Main text */}
       <div style={ss.bubbleContent}>
         {role === "assistant" ? (
           showThinking ? (
@@ -411,14 +540,19 @@ function MessageBubble({
           text
         )}
       </div>
+
+      {/* Actions */}
       {text && (
         <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
           <button onClick={copy} style={ss.microBtn}>
             {copied ? "✓ Copiado" : "Copiar"}
           </button>
           {showRegen && (
-            <button onClick={onRegen} style={ss.microBtn}>
-              ↺ Regenerar
+            <button onClick={onRegen} style={ss.microBtn}>↺ Regenerar</button>
+          )}
+          {role === "user" && onEdit && (hovered || isLoading === false) && (
+            <button onClick={onEdit} style={ss.microBtn} title="Editar y regenerar desde este punto">
+              ✎ Editar
             </button>
           )}
         </div>
@@ -427,19 +561,11 @@ function MessageBubble({
   )
 }
 
-// ─── ThreadItem (Tier 4: rename inline con doble-click) ──────────────────────
+// ─── ThreadItem ───────────────────────────────────────────────────────────────
 function ThreadItem({
-  thread,
-  isActive,
-  onSelect,
-  onDelete,
-  onRename,
+  thread, isActive, onSelect, onDelete, onRename,
 }: {
-  thread: Thread
-  isActive: boolean
-  onSelect: () => void
-  onDelete: () => void
-  onRename: (title: string) => void
+  thread: Thread; isActive: boolean; onSelect: () => void; onDelete: () => void; onRename: (t: string) => void
 }) {
   const [hovered, setHovered] = useState(false)
   const [editing, setEditing] = useState(false)
@@ -465,41 +591,20 @@ function ThreadItem({
 
   return (
     <div
-      style={{
-        ...ss.threadItem,
-        background: isActive
-          ? "var(--ai4u-bg-default)"
-          : hovered
-            ? "rgba(0,0,0,0.03)"
-            : "transparent",
-      }}
+      style={{ ...ss.threadItem, background: isActive ? "var(--ai4u-bg-default)" : hovered ? "rgba(0,0,0,0.03)" : "transparent" }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
       {editing ? (
-        <input
-          ref={inputRef}
-          value={editValue}
-          onChange={(e) => setEditValue(e.target.value)}
-          onBlur={commitEdit}
-          onKeyDown={handleEditKey}
-          style={ss.renameInput}
-        />
+        <input ref={inputRef} value={editValue} onChange={(e) => setEditValue(e.target.value)} onBlur={commitEdit} onKeyDown={handleEditKey} style={ss.renameInput} />
       ) : (
         <button onClick={onSelect} onDoubleClick={startEdit} style={ss.threadBtn}>
           <span style={ss.threadTitle}>{thread.title}</span>
           <span style={ss.threadTime}>{relativeTime(thread.updatedAt)}</span>
         </button>
       )}
-
       {!editing && (isActive || hovered) && (
-        <button
-          onClick={(e) => { e.stopPropagation(); onDelete() }}
-          style={ss.deleteBtn}
-          title="Eliminar hilo"
-        >
-          ✕
-        </button>
+        <button onClick={(e) => { e.stopPropagation(); onDelete() }} style={ss.deleteBtn} title="Eliminar hilo">✕</button>
       )}
     </div>
   )
@@ -507,275 +612,49 @@ function ThreadItem({
 
 // ─── Estilos ───────────────────────────────────────────────────────────────────
 const ss: Record<string, React.CSSProperties> = {
-  root: {
-    display: "flex",
-    height: "100vh",
-    fontFamily: "var(--font-red-hat, 'Red Hat Display', system-ui, sans-serif)",
-    background: "var(--ai4u-bg-default)",
-  },
-  lockScreen: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    height: "100vh",
-    background: "var(--ai4u-bg-default)",
-    gap: 16,
-    textAlign: "center",
-    padding: 24,
-  },
+  root: { display: "flex", height: "100vh", fontFamily: "var(--font-red-hat, 'Red Hat Display', system-ui, sans-serif)", background: "var(--ai4u-bg-default)" },
+  lockScreen: { display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100vh", background: "var(--ai4u-bg-default)", gap: 16, textAlign: "center", padding: 24 },
 
   // Sidebar
-  sidebar: {
-    width: 260,
-    flexShrink: 0,
-    background: "var(--ai4u-bg-surface)",
-    borderRight: "1px solid var(--ai4u-border-color)",
-    display: "flex",
-    flexDirection: "column",
-    overflow: "hidden",
-  },
-  sidebarHeader: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    padding: "14px 14px 10px",
-    borderBottom: "1px solid var(--ai4u-border-color)",
-    flexShrink: 0,
-  },
-  newBtn: {
-    background: "var(--ai4u-black)",
-    color: "var(--ai4u-white)",
-    border: "none",
-    borderRadius: 6,
-    width: 28,
-    height: 28,
-    fontSize: 18,
-    lineHeight: "1",
-    cursor: "pointer",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    fontFamily: "inherit",
-  },
-  searchInput: {
-    width: "100%",
-    padding: "6px 10px",
-    border: "1px solid var(--ai4u-border-color)",
-    borderRadius: 8,
-    fontSize: 12,
-    background: "var(--ai4u-bg-default)",
-    color: "var(--ai4u-text-primary)",
-    fontFamily: "inherit",
-    outline: "none",
-    boxSizing: "border-box" as const,
-  },
-  threadList: {
-    flex: 1,
-    overflowY: "auto",
-    padding: "6px 8px",
-  },
-  threadItem: {
-    display: "flex",
-    alignItems: "center",
-    borderRadius: 8,
-    marginBottom: 2,
-    transition: "background 0.1s",
-  },
-  threadBtn: {
-    flex: 1,
-    background: "transparent",
-    border: "none",
-    cursor: "pointer",
-    padding: "8px 8px",
-    textAlign: "left" as const,
-    fontFamily: "inherit",
-    display: "flex",
-    flexDirection: "column" as const,
-    gap: 2,
-    minWidth: 0,
-  },
-  threadTitle: {
-    fontSize: 13,
-    color: "var(--ai4u-text-primary)",
-    whiteSpace: "nowrap" as const,
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    display: "block",
-    maxWidth: 180,
-  },
-  threadTime: {
-    fontSize: 11,
-    color: "var(--ai4u-cadet-gray)",
-  },
-  renameInput: {
-    flex: 1,
-    margin: "4px 6px",
-    padding: "4px 8px",
-    border: "1px solid var(--ai4u-border-color)",
-    borderRadius: 6,
-    fontSize: 13,
-    fontFamily: "inherit",
-    outline: "none",
-    background: "var(--ai4u-bg-default)",
-    color: "var(--ai4u-text-primary)",
-  },
-  deleteBtn: {
-    background: "transparent",
-    border: "none",
-    cursor: "pointer",
-    color: "var(--ai4u-cadet-gray)",
-    fontSize: 12,
-    padding: "4px 8px",
-    borderRadius: 4,
-    flexShrink: 0,
-    fontFamily: "inherit",
-  },
+  sidebar: { width: 260, flexShrink: 0, background: "var(--ai4u-bg-surface)", borderRight: "1px solid var(--ai4u-border-color)", display: "flex", flexDirection: "column", overflow: "hidden" },
+  sidebarHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 14px 10px", borderBottom: "1px solid var(--ai4u-border-color)", flexShrink: 0 },
+  newBtn: { background: "var(--ai4u-black)", color: "var(--ai4u-white)", border: "none", borderRadius: 6, width: 28, height: 28, fontSize: 18, lineHeight: "1", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "inherit" },
+  searchInput: { width: "100%", padding: "6px 10px", border: "1px solid var(--ai4u-border-color)", borderRadius: 8, fontSize: 12, background: "var(--ai4u-bg-default)", color: "var(--ai4u-text-primary)", fontFamily: "inherit", outline: "none", boxSizing: "border-box" as const },
+  threadList: { flex: 1, overflowY: "auto", padding: "6px 8px" },
+  threadItem: { display: "flex", alignItems: "center", borderRadius: 8, marginBottom: 2, transition: "background 0.1s" },
+  threadBtn: { flex: 1, background: "transparent", border: "none", cursor: "pointer", padding: "8px 8px", textAlign: "left" as const, fontFamily: "inherit", display: "flex", flexDirection: "column" as const, gap: 2, minWidth: 0 },
+  threadTitle: { fontSize: 13, color: "var(--ai4u-text-primary)", whiteSpace: "nowrap" as const, overflow: "hidden", textOverflow: "ellipsis", display: "block", maxWidth: 180 },
+  threadTime: { fontSize: 11, color: "var(--ai4u-cadet-gray)" },
+  renameInput: { flex: 1, margin: "4px 6px", padding: "4px 8px", border: "1px solid var(--ai4u-border-color)", borderRadius: 6, fontSize: 13, fontFamily: "inherit", outline: "none", background: "var(--ai4u-bg-default)", color: "var(--ai4u-text-primary)" },
+  deleteBtn: { background: "transparent", border: "none", cursor: "pointer", color: "var(--ai4u-cadet-gray)", fontSize: 12, padding: "4px 8px", borderRadius: 4, flexShrink: 0, fontFamily: "inherit" },
 
   // Chat
-  chat: {
-    flex: 1,
-    display: "flex",
-    flexDirection: "column",
-    overflow: "hidden",
-  },
-  header: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: 12,
-    padding: "12px 20px",
-    background: "var(--ai4u-bg-surface)",
-    borderBottom: "1px solid var(--ai4u-border-color)",
-    flexShrink: 0,
-  },
-  messages: {
-    flex: 1,
-    overflowY: "auto",
-    padding: "20px",
-    display: "flex",
-    flexDirection: "column",
-    gap: 16,
-  },
-  empty: {
-    maxWidth: 560,
-    margin: "40px auto",
-    textAlign: "center",
-  },
-  suggestionBtn: {
-    background: "var(--ai4u-bg-surface)",
-    border: "1px solid var(--ai4u-border-color)",
-    borderRadius: 20,
-    padding: "6px 14px",
-    fontSize: 13,
-    cursor: "pointer",
-    color: "var(--ai4u-text-primary)",
-    fontFamily: "inherit",
-  },
-  userBubble: {
-    alignSelf: "flex-end",
-    maxWidth: "75%",
-    background: "var(--ai4u-black)",
-    color: "var(--ai4u-white)",
-    borderRadius: "16px 16px 4px 16px",
-    padding: "12px 16px",
-  },
-  aiBubble: {
-    alignSelf: "flex-start",
-    maxWidth: "85%",
-    background: "var(--ai4u-bg-surface)",
-    border: "1px solid var(--ai4u-border-color)",
-    borderRadius: "16px 16px 16px 4px",
-    padding: "12px 16px",
-  },
-  bubbleLabel: {
-    fontSize: 11,
-    fontWeight: 600,
-    opacity: 0.6,
-    marginBottom: 4,
-    textTransform: "uppercase" as const,
-    letterSpacing: "0.08em",
-    fontFamily: "'Necto Mono', monospace",
-  },
-  bubbleContent: {
-    fontSize: 14,
-    lineHeight: 1.6,
-    wordBreak: "break-word" as const,
-  },
-  microBtn: {
-    background: "transparent",
-    border: "none",
-    color: "var(--ai4u-cadet-gray)",
-    fontSize: 11,
-    cursor: "pointer",
-    padding: "2px 0",
-    fontFamily: "inherit",
-  },
-  errorBox: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    background: "rgba(255,110,0,0.05)",
-    border: "1px solid rgba(255,110,0,0.30)",
-    borderRadius: 8,
-    padding: "10px 14px",
-    color: "var(--ai4u-orange)",
-    fontSize: 13,
-    gap: 8,
-  },
-  errorClose: {
-    background: "transparent",
-    border: "none",
-    color: "var(--ai4u-orange)",
-    cursor: "pointer",
-    fontSize: 13,
-    padding: 0,
-    fontFamily: "inherit",
-    flexShrink: 0,
-  },
-  inputArea: {
-    display: "flex",
-    gap: 10,
-    padding: "14px 20px",
-    background: "var(--ai4u-bg-surface)",
-    borderTop: "1px solid var(--ai4u-border-color)",
-    flexShrink: 0,
-    alignItems: "flex-end",
-  },
-  textarea: {
-    flex: 1,
-    padding: "10px 14px",
-    border: "1px solid var(--ai4u-border-color)",
-    borderRadius: 10,
-    fontSize: 14,
-    resize: "none" as const,
-    fontFamily: "inherit",
-    lineHeight: 1.5,
-    outline: "none",
-    background: "var(--ai4u-bg-default)",
-    color: "var(--ai4u-text-primary)",
-    overflow: "hidden",
-  },
-  primaryBtn: {
-    background: "var(--ai4u-black)",
-    color: "var(--ai4u-white)",
-    border: "none",
-    borderRadius: 8,
-    padding: "10px 18px",
-    fontSize: 14,
-    cursor: "pointer",
-    fontWeight: 500,
-    fontFamily: "inherit",
-  },
-  ghostBtn: {
-    background: "transparent",
-    color: "var(--ai4u-text-secondary)",
-    border: "1px solid var(--ai4u-border-color)",
-    borderRadius: 8,
-    padding: "6px 12px",
-    fontSize: 13,
-    cursor: "pointer",
-    fontFamily: "inherit",
-    whiteSpace: "nowrap" as const,
-  },
+  chat: { flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" },
+  header: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "12px 20px", background: "var(--ai4u-bg-surface)", borderBottom: "1px solid var(--ai4u-border-color)", flexShrink: 0 },
+  messages: { flex: 1, overflowY: "auto", padding: "20px", display: "flex", flexDirection: "column", gap: 16 },
+  empty: { maxWidth: 560, margin: "40px auto", textAlign: "center" },
+  suggestionBtn: { background: "var(--ai4u-bg-surface)", border: "1px solid var(--ai4u-border-color)", borderRadius: 20, padding: "6px 14px", fontSize: 13, cursor: "pointer", color: "var(--ai4u-text-primary)", fontFamily: "inherit" },
+  userBubble: { alignSelf: "flex-end", maxWidth: "75%", background: "var(--ai4u-black)", color: "var(--ai4u-white)", borderRadius: "16px 16px 4px 16px", padding: "12px 16px" },
+  aiBubble: { alignSelf: "flex-start", maxWidth: "85%", background: "var(--ai4u-bg-surface)", border: "1px solid var(--ai4u-border-color)", borderRadius: "16px 16px 16px 4px", padding: "12px 16px" },
+  bubbleLabel: { fontSize: 11, fontWeight: 600, opacity: 0.6, marginBottom: 4, textTransform: "uppercase" as const, letterSpacing: "0.08em", fontFamily: "'Necto Mono', monospace" },
+  bubbleContent: { fontSize: 14, lineHeight: 1.6, wordBreak: "break-word" as const },
+  microBtn: { background: "transparent", border: "none", color: "var(--ai4u-cadet-gray)", fontSize: 11, cursor: "pointer", padding: "2px 0", fontFamily: "inherit" },
+  errorBox: { display: "flex", justifyContent: "space-between", alignItems: "center", background: "rgba(255,110,0,0.05)", border: "1px solid rgba(255,110,0,0.30)", borderRadius: 8, padding: "10px 14px", color: "var(--ai4u-orange)", fontSize: 13, gap: 8 },
+  errorClose: { background: "transparent", border: "none", color: "var(--ai4u-orange)", cursor: "pointer", fontSize: 13, padding: 0, fontFamily: "inherit", flexShrink: 0 },
+  inputArea: { display: "flex", gap: 10, padding: "14px 20px", background: "var(--ai4u-bg-surface)", borderTop: "1px solid var(--ai4u-border-color)", flexShrink: 0, alignItems: "flex-end" },
+  textarea: { flex: 1, padding: "10px 14px", border: "1px solid var(--ai4u-border-color)", borderRadius: 10, fontSize: 14, resize: "none" as const, fontFamily: "inherit", lineHeight: 1.5, outline: "none", background: "var(--ai4u-bg-default)", color: "var(--ai4u-text-primary)", overflow: "hidden" },
+  primaryBtn: { background: "var(--ai4u-black)", color: "var(--ai4u-white)", border: "none", borderRadius: 8, padding: "10px 18px", fontSize: 14, cursor: "pointer", fontWeight: 500, fontFamily: "inherit" },
+  ghostBtn: { background: "transparent", color: "var(--ai4u-text-secondary)", border: "1px solid var(--ai4u-border-color)", borderRadius: 8, padding: "6px 12px", fontSize: 13, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" as const },
+
+  // Tool steps
+  toolStepList: { display: "flex", flexDirection: "column" as const, gap: 4, marginBottom: 10, borderLeft: "2px solid var(--ai4u-border-color)", paddingLeft: 10 },
+  toolStep: { fontSize: 12, color: "var(--ai4u-text-secondary)" },
+  toolStepHeader: { display: "flex", alignItems: "center", gap: 6, background: "transparent", border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 12, color: "var(--ai4u-text-secondary)", padding: "3px 0", width: "100%", textAlign: "left" as const },
+  toolOutput: { fontSize: 11, fontFamily: "monospace", background: "rgba(0,0,0,0.04)", borderRadius: 6, padding: "8px 10px", overflowX: "auto" as const, maxHeight: 200, overflowY: "auto" as const, marginTop: 4, color: "var(--ai4u-text-secondary)" },
+  toolError: { fontSize: 11, color: "var(--ai4u-orange)", marginTop: 4, paddingLeft: 4 },
+
+  // Reasoning / thinking
+  reasoningBlock: { marginBottom: 8, borderRadius: 8, border: "1px solid var(--ai4u-border-color)", overflow: "hidden" },
+  reasoningToggle: { display: "flex", alignItems: "center", gap: 6, width: "100%", background: "rgba(0,0,0,0.02)", border: "none", cursor: "pointer", padding: "6px 10px", fontSize: 11, color: "var(--ai4u-text-secondary)", fontFamily: "inherit", textAlign: "left" as const },
+  reasoningText: { fontSize: 12, lineHeight: 1.6, color: "var(--ai4u-text-secondary)", padding: "8px 10px", whiteSpace: "pre-wrap" as const, maxHeight: 300, overflowY: "auto" as const },
 }
