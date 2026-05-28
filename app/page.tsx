@@ -92,7 +92,7 @@ export default function ChatPage() {
           {tenantName ? `${tenantName} — SAP B1` : "SAP B1 — Asistente"}
         </span>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <span style={{ fontSize: 12, color: "#888" }}>{BACKEND_URL}</span>
+          <span style={{ fontSize: 12, color: "var(--ai4u-cadet-gray)", fontFamily: "'Necto Mono', monospace" }}>{BACKEND_URL}</span>
           <button onClick={() => setMessages([])} style={styles.ghostBtn}>
             Nueva conversación
           </button>
@@ -102,7 +102,7 @@ export default function ChatPage() {
       <div style={styles.messages}>
         {messages.length === 0 && (
           <div style={styles.empty}>
-            <p style={{ fontSize: 15, color: "#555", marginBottom: 16 }}>
+            <p style={{ fontSize: 15, color: "var(--ai4u-text-secondary)", marginBottom: 16 }}>
               Puedes preguntarme sobre datos en SAP, endpoints disponibles o pedirme indicadores.
             </p>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center" }}>
@@ -138,7 +138,7 @@ export default function ChatPage() {
                   msg.content
                 )
               ) : loading && i === messages.length - 1 ? (
-                <span style={{ color: "#888" }}>Pensando…</span>
+                <span style={{ color: "var(--ai4u-cadet-gray)" }}>Pensando…</span>
               ) : null}
             </div>
           </div>
@@ -179,7 +179,7 @@ function renderInline(text: string): React.ReactNode[] {
     if (m.index > last) parts.push(text.slice(last, m.index))
     const tok = m[0]
     if (tok.startsWith("`"))
-      parts.push(<code key={key++} style={{ background: "#f0f0f0", borderRadius: 3, padding: "1px 5px", fontSize: 12, fontFamily: "monospace" }}>{tok.slice(1, -1)}</code>)
+      parts.push(<code key={key++} style={{ background: "var(--ai4u-gray-100)", borderRadius: 3, padding: "1px 5px", fontSize: 12, fontFamily: "'Necto Mono', monospace" }}>{tok.slice(1, -1)}</code>)
     else if (tok.startsWith("**"))
       parts.push(<strong key={key++}>{tok.slice(2, -2)}</strong>)
     else
@@ -204,7 +204,7 @@ function MarkdownContent({ text }: { text: string }) {
       i++
       while (i < lines.length && !lines[i].startsWith("```")) { codeLines.push(lines[i]); i++ }
       nodes.push(
-        <pre key={key++} style={{ background: "#f4f4f4", borderRadius: 6, padding: "10px 12px", margin: "8px 0", overflowX: "auto", fontSize: 12 }}>
+        <pre key={key++} style={{ background: "var(--ai4u-gray-100)", borderRadius: 6, padding: "10px 12px", margin: "8px 0", overflowX: "auto", fontSize: 12, fontFamily: "'Necto Mono', monospace" }}>
           <code>{codeLines.join("\n")}</code>
         </pre>
       )
@@ -223,8 +223,8 @@ function MarkdownContent({ text }: { text: string }) {
       nodes.push(
         <div key={key++} style={{ overflowX: "auto", margin: "8px 0" }}>
           <table style={{ borderCollapse: "collapse", fontSize: 13, width: "100%" }}>
-            <thead><tr>{headers.map((h, j) => <th key={j} style={{ border: "1px solid #ddd", padding: "6px 10px", background: "#f5f5f5", textAlign: "left", fontWeight: 600 }}>{renderInline(h)}</th>)}</tr></thead>
-            <tbody>{rows.map((row, r) => <tr key={r}>{row.map((c, j) => <td key={j} style={{ border: "1px solid #ddd", padding: "6px 10px" }}>{renderInline(c)}</td>)}</tr>)}</tbody>
+            <thead><tr>{headers.map((h, j) => <th key={j} style={{ border: "1px solid var(--ai4u-border-color)", padding: "6px 10px", background: "var(--ai4u-gray-100)", textAlign: "left", fontWeight: 600 }}>{renderInline(h)}</th>)}</tr></thead>
+            <tbody>{rows.map((row, r) => <tr key={r}>{row.map((c, j) => <td key={j} style={{ border: "1px solid var(--ai4u-border-color)", padding: "6px 10px" }}>{renderInline(c)}</td>)}</tr>)}</tbody>
           </table>
         </div>
       )
@@ -242,14 +242,14 @@ function MarkdownContent({ text }: { text: string }) {
 
     // hr
     if (line.match(/^---+$/)) {
-      nodes.push(<hr key={key++} style={{ border: "none", borderTop: "1px solid #e5e5e5", margin: "10px 0" }} />)
+      nodes.push(<hr key={key++} style={{ border: "none", borderTop: "1px solid var(--ai4u-border-color)", margin: "10px 0" }} />)
       i++; continue
     }
 
     // blockquote
     if (line.startsWith("> ")) {
       nodes.push(
-        <blockquote key={key++} style={{ borderLeft: "3px solid #ddd", margin: "6px 0", paddingLeft: 12, color: "#555" }}>
+        <blockquote key={key++} style={{ borderLeft: "3px solid var(--ai4u-border-color)", margin: "6px 0", paddingLeft: 12, color: "var(--ai4u-text-secondary)" }}>
           {renderInline(line.slice(2))}
         </blockquote>
       )
@@ -294,16 +294,16 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     flexDirection: "column",
     height: "100vh",
-    fontFamily: "system-ui, sans-serif",
-    background: "#f9f9f9",
+    fontFamily: "var(--font-red-hat, 'Red Hat Display', system-ui, sans-serif)",
+    background: "var(--ai4u-bg-default)",
   },
   header: {
     display: "flex",
     justifyContent: "space-between",
     alignItems: "center",
     padding: "12px 20px",
-    background: "#fff",
-    borderBottom: "1px solid #e5e5e5",
+    background: "var(--ai4u-bg-surface)",
+    borderBottom: "1px solid var(--ai4u-border-color)",
     flexShrink: 0,
   },
   messages: {
@@ -320,27 +320,28 @@ const styles: Record<string, React.CSSProperties> = {
     textAlign: "center",
   },
   suggestionBtn: {
-    background: "#fff",
-    border: "1px solid #ddd",
+    background: "var(--ai4u-bg-surface)",
+    border: "1px solid var(--ai4u-border-color)",
     borderRadius: 20,
     padding: "6px 14px",
     fontSize: 13,
     cursor: "pointer",
-    color: "#333",
+    color: "var(--ai4u-text-primary)",
+    fontFamily: "inherit",
   },
   userBubble: {
     alignSelf: "flex-end",
     maxWidth: "75%",
-    background: "#1d1d1f",
-    color: "#fff",
+    background: "var(--ai4u-black)",
+    color: "var(--ai4u-white)",
     borderRadius: "16px 16px 4px 16px",
     padding: "12px 16px",
   },
   aiBubble: {
     alignSelf: "flex-start",
     maxWidth: "85%",
-    background: "#fff",
-    border: "1px solid #e5e5e5",
+    background: "var(--ai4u-bg-surface)",
+    border: "1px solid var(--ai4u-border-color)",
     borderRadius: "16px 16px 16px 4px",
     padding: "12px 16px",
   },
@@ -350,7 +351,8 @@ const styles: Record<string, React.CSSProperties> = {
     opacity: 0.6,
     marginBottom: 4,
     textTransform: "uppercase",
-    letterSpacing: "0.05em",
+    letterSpacing: "0.08em",
+    fontFamily: "'Necto Mono', monospace",
   },
   bubbleContent: {
     fontSize: 14,
@@ -358,50 +360,54 @@ const styles: Record<string, React.CSSProperties> = {
     wordBreak: "break-word",
   },
   errorBox: {
-    background: "#fff0f0",
-    border: "1px solid #ffcccc",
+    background: "rgba(255, 110, 0, 0.05)",
+    border: "1px solid rgba(255, 110, 0, 0.30)",
     borderRadius: 8,
     padding: "10px 14px",
-    color: "#cc0000",
+    color: "var(--ai4u-orange)",
     fontSize: 13,
   },
   inputArea: {
     display: "flex",
     gap: 10,
     padding: "14px 20px",
-    background: "#fff",
-    borderTop: "1px solid #e5e5e5",
+    background: "var(--ai4u-bg-surface)",
+    borderTop: "1px solid var(--ai4u-border-color)",
     flexShrink: 0,
     alignItems: "flex-end",
   },
   textarea: {
     flex: 1,
     padding: "10px 14px",
-    border: "1px solid #ddd",
+    border: "1px solid var(--ai4u-border-color)",
     borderRadius: 10,
     fontSize: 14,
     resize: "none",
-    fontFamily: "system-ui, sans-serif",
+    fontFamily: "inherit",
     lineHeight: 1.5,
     outline: "none",
+    background: "var(--ai4u-bg-default)",
+    color: "var(--ai4u-text-primary)",
   },
   primaryBtn: {
-    background: "#1d1d1f",
-    color: "#fff",
+    background: "var(--ai4u-black)",
+    color: "var(--ai4u-white)",
     border: "none",
     borderRadius: 8,
     padding: "10px 18px",
     fontSize: 14,
     cursor: "pointer",
     fontWeight: 500,
+    fontFamily: "inherit",
   },
   ghostBtn: {
     background: "transparent",
-    color: "#555",
-    border: "1px solid #ddd",
+    color: "var(--ai4u-text-secondary)",
+    border: "1px solid var(--ai4u-border-color)",
     borderRadius: 8,
     padding: "6px 12px",
     fontSize: 13,
     cursor: "pointer",
+    fontFamily: "inherit",
   },
 }
