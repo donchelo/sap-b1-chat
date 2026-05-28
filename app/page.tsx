@@ -92,6 +92,7 @@ function ChatUI({ apiKey }: { apiKey: string }) {
   const [tenantName, setTenantName] = useState("")
   const [inputValue, setInputValue] = useState("")
   const [search, setSearch] = useState("")
+  const [sidebarOpen, setSidebarOpen] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
 
@@ -184,12 +185,14 @@ function ChatUI({ apiKey }: { apiKey: string }) {
     if (isLoading) stop()
     if (messages.length > 0 && activeThreadId) saveMessages(activeThreadId, messages)
     setActiveThreadId(threadId)
+    setSidebarOpen(false)
   }
 
   function handleNewThread() {
     if (isLoading) stop()
     if (messages.length > 0 && activeThreadId) saveMessages(activeThreadId, messages)
     createThread()
+    setSidebarOpen(false)
   }
 
   // Edit message: corta el historial al índice y pone el texto en el input
@@ -208,10 +211,16 @@ function ChatUI({ apiKey }: { apiKey: string }) {
   }
 
   return (
-    <div style={ss.root}>
+    <div className="chat-root">
+
+      {/* ── Backdrop móvil ──────────────────────────────────────── */}
+      <div
+        className={`sidebar-backdrop${sidebarOpen ? " is-open" : ""}`}
+        onClick={() => setSidebarOpen(false)}
+      />
 
       {/* ── Sidebar ─────────────────────────────────────────────── */}
-      <aside style={ss.sidebar}>
+      <aside className={`chat-sidebar${sidebarOpen ? " is-open" : ""}`}>
         <div style={ss.sidebarHeader}>
           <span style={{ fontWeight: 600, fontSize: 13, color: "var(--ai4u-text-primary)" }}>
             {tenantName || "SAP B1"}
@@ -251,11 +260,20 @@ function ChatUI({ apiKey }: { apiKey: string }) {
       </aside>
 
       {/* ── Área de chat ─────────────────────────────────────────── */}
-      <main style={ss.chat}>
-        <header style={ss.header}>
-          <span style={{ fontWeight: 600, fontSize: 15, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {activeThread?.title ?? "SAP B1 — Asistente"}
-          </span>
+      <main className="chat-main">
+        <header className="chat-header">
+          <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0, flex: 1 }}>
+            <button
+              className="menu-btn"
+              onClick={() => setSidebarOpen((v) => !v)}
+              aria-label={sidebarOpen ? "Cerrar menú" : "Abrir menú"}
+            >
+              ☰
+            </button>
+            <span style={{ fontWeight: 600, fontSize: 15, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {activeThread?.title ?? "SAP B1 — Asistente"}
+            </span>
+          </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
             {/* Token indicator */}
             {messages.length > 0 && (
@@ -276,7 +294,7 @@ function ChatUI({ apiKey }: { apiKey: string }) {
           </div>
         </header>
 
-        <div style={ss.messages}>
+        <div className="chat-messages">
           {messages.length === 0 && status === "ready" && (
             <SuggestionsPanel
               suggestions={suggestions}
@@ -308,7 +326,7 @@ function ChatUI({ apiKey }: { apiKey: string }) {
           })}
 
           {status === "submitted" && (
-            <div style={ss.aiBubble}>
+            <div className="ai-bubble">
               <div style={ss.bubbleLabel}>Asistente</div>
               <div style={ss.bubbleContent}>
                 <span style={{ color: "var(--ai4u-cadet-gray)" }}>Pensando…</span>
@@ -326,7 +344,7 @@ function ChatUI({ apiKey }: { apiKey: string }) {
           <div ref={bottomRef} />
         </div>
 
-        <div style={ss.inputArea}>
+        <div className="chat-input-area">
           <textarea
             ref={textareaRef}
             value={inputValue}
@@ -501,7 +519,7 @@ function MessageBubble({
 
   return (
     <div
-      style={role === "user" ? ss.userBubble : ss.aiBubble}
+      className={role === "user" ? "user-bubble" : "ai-bubble"}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
@@ -612,11 +630,9 @@ function ThreadItem({
 
 // ─── Estilos ───────────────────────────────────────────────────────────────────
 const ss: Record<string, React.CSSProperties> = {
-  root: { display: "flex", height: "100vh", fontFamily: "var(--font-red-hat, 'Red Hat Display', system-ui, sans-serif)", background: "var(--ai4u-bg-default)" },
-  lockScreen: { display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100vh", background: "var(--ai4u-bg-default)", gap: 16, textAlign: "center", padding: 24 },
+  lockScreen: { display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100dvh", background: "var(--ai4u-bg-default)", gap: 16, textAlign: "center", padding: 24 },
 
   // Sidebar
-  sidebar: { width: 260, flexShrink: 0, background: "var(--ai4u-bg-surface)", borderRight: "1px solid var(--ai4u-border-color)", display: "flex", flexDirection: "column", overflow: "hidden" },
   sidebarHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 14px 10px", borderBottom: "1px solid var(--ai4u-border-color)", flexShrink: 0 },
   newBtn: { background: "var(--ai4u-black)", color: "var(--ai4u-white)", border: "none", borderRadius: 6, width: 28, height: 28, fontSize: 18, lineHeight: "1", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "inherit" },
   searchInput: { width: "100%", padding: "6px 10px", border: "1px solid var(--ai4u-border-color)", borderRadius: 8, fontSize: 12, background: "var(--ai4u-bg-default)", color: "var(--ai4u-text-primary)", fontFamily: "inherit", outline: "none", boxSizing: "border-box" as const },
@@ -629,19 +645,13 @@ const ss: Record<string, React.CSSProperties> = {
   deleteBtn: { background: "transparent", border: "none", cursor: "pointer", color: "var(--ai4u-cadet-gray)", fontSize: 12, padding: "4px 8px", borderRadius: 4, flexShrink: 0, fontFamily: "inherit" },
 
   // Chat
-  chat: { flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" },
-  header: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "12px 20px", background: "var(--ai4u-bg-surface)", borderBottom: "1px solid var(--ai4u-border-color)", flexShrink: 0 },
-  messages: { flex: 1, overflowY: "auto", padding: "20px", display: "flex", flexDirection: "column", gap: 16 },
   empty: { maxWidth: 560, margin: "40px auto", textAlign: "center" },
   suggestionBtn: { background: "var(--ai4u-bg-surface)", border: "1px solid var(--ai4u-border-color)", borderRadius: 20, padding: "6px 14px", fontSize: 13, cursor: "pointer", color: "var(--ai4u-text-primary)", fontFamily: "inherit" },
-  userBubble: { alignSelf: "flex-end", maxWidth: "75%", background: "var(--ai4u-black)", color: "var(--ai4u-white)", borderRadius: "16px 16px 4px 16px", padding: "12px 16px" },
-  aiBubble: { alignSelf: "flex-start", maxWidth: "85%", background: "var(--ai4u-bg-surface)", border: "1px solid var(--ai4u-border-color)", borderRadius: "16px 16px 16px 4px", padding: "12px 16px" },
   bubbleLabel: { fontSize: 11, fontWeight: 600, opacity: 0.6, marginBottom: 4, textTransform: "uppercase" as const, letterSpacing: "0.08em", fontFamily: "'Necto Mono', monospace" },
   bubbleContent: { fontSize: 14, lineHeight: 1.6, wordBreak: "break-word" as const },
   microBtn: { background: "transparent", border: "none", color: "var(--ai4u-cadet-gray)", fontSize: 11, cursor: "pointer", padding: "2px 0", fontFamily: "inherit" },
   errorBox: { display: "flex", justifyContent: "space-between", alignItems: "center", background: "rgba(255,110,0,0.05)", border: "1px solid rgba(255,110,0,0.30)", borderRadius: 8, padding: "10px 14px", color: "var(--ai4u-orange)", fontSize: 13, gap: 8 },
   errorClose: { background: "transparent", border: "none", color: "var(--ai4u-orange)", cursor: "pointer", fontSize: 13, padding: 0, fontFamily: "inherit", flexShrink: 0 },
-  inputArea: { display: "flex", gap: 10, padding: "14px 20px", background: "var(--ai4u-bg-surface)", borderTop: "1px solid var(--ai4u-border-color)", flexShrink: 0, alignItems: "flex-end" },
   textarea: { flex: 1, padding: "10px 14px", border: "1px solid var(--ai4u-border-color)", borderRadius: 10, fontSize: 14, resize: "none" as const, fontFamily: "inherit", lineHeight: 1.5, outline: "none", background: "var(--ai4u-bg-default)", color: "var(--ai4u-text-primary)", overflow: "hidden" },
   primaryBtn: { background: "var(--ai4u-black)", color: "var(--ai4u-white)", border: "none", borderRadius: 8, padding: "10px 18px", fontSize: 14, cursor: "pointer", fontWeight: 500, fontFamily: "inherit" },
   ghostBtn: { background: "transparent", color: "var(--ai4u-text-secondary)", border: "1px solid var(--ai4u-border-color)", borderRadius: 8, padding: "6px 12px", fontSize: 13, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" as const },
