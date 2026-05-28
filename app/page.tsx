@@ -10,8 +10,14 @@ interface Message {
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:4100"
 const DEFAULT_API_KEY = process.env.NEXT_PUBLIC_SAP_API_KEY ?? ""
 
+function getInitialApiKey(): string {
+  if (typeof window === "undefined") return DEFAULT_API_KEY
+  const param = new URLSearchParams(window.location.search).get("apiKey")
+  return param ?? DEFAULT_API_KEY
+}
+
 export default function ChatPage() {
-  const [apiKey] = useState(DEFAULT_API_KEY)
+  const [apiKey] = useState(getInitialApiKey)
   const [tenantName, setTenantName] = useState("")
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState("")
