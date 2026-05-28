@@ -1,322 +1,649 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useChat } from "@ai-sdk/react"
+import { isTextUIPart, TextStreamChatTransport } from "ai"
+import { useEffect, useMemo, useRef, useState } from "react"
+import { MarkdownContent } from "./components/MarkdownContent"
+import { useThreads, type Thread } from "./hooks/useThreads"
+import { useSuggestions } from "./hooks/useSuggestions"
 
-interface Message {
-  role: "user" | "assistant"
-  content: string
-}
+// ─── Chatbot fundamentals — resumen ──────────────────────────────────────────
+//  Tier 1  Streaming · historial · error handling · stop · fix hooks
+//  Tier 2  Auto-resize textarea · Detener btn · Pensando… · Regenerar
+//  Tier 3  Multi-hilo localStorage · título auto · switching · eliminar
+//  Tier 4  Búsqueda en hilos · Rename inline · Copy message · Export .md
+//  Tier 5  Preguntas estratégicas auto-generadas por LLM (cache diaria)
+// ─────────────────────────────────────────────────────────────────────────────
 
-const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:4100"
+const BACKEND_URL =
+  process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:4100"
 
 function getInitialApiKey(): string {
   if (typeof window === "undefined") return ""
   return new URLSearchParams(window.location.search).get("apiKey") ?? ""
 }
 
+function relativeTime(ts: number): string {
+  const min = Math.floor((Date.now() - ts) / 60000)
+  if (min < 1) return "ahora"
+  if (min < 60) return `${min}m`
+  const hrs = Math.floor(min / 60)
+  if (hrs < 24) return `${hrs}h`
+  return new Date(ts).toLocaleDateString("es", { month: "short", day: "numeric" })
+}
+
+// Descarga el hilo activo como archivo Markdown (Tier 4 — 100% frontend)
+function exportAsMarkdown(thread: Thread) {
+  const sections = thread.messages.map((msg) => {
+    const text = msg.parts.filter(isTextUIPart).map((p) => p.text).join("")
+    const label = msg.role === "user" ? "**Usuario**" : "**Asistente**"
+    return `${label}\n\n${text}`
+  })
+  const md = `# ${thread.title}\n\n${sections.join("\n\n---\n\n")}`
+  const blob = new Blob([md], { type: "text/markdown; charset=utf-8" })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement("a")
+  a.href = url
+  a.download = `${thread.title.slice(0, 48).replace(/[^\w\s-]/g, "")}.md`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+// ─── Root: sólo gate de acceso ────────────────────────────────────────────────
 export default function ChatPage() {
   const [apiKey] = useState(getInitialApiKey)
 
   if (!apiKey) {
     return (
-      <main style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100vh", background: "var(--ai4u-bg-default)", gap: 16, textAlign: "center", padding: 24 }}>
+      <main style={ss.lockScreen}>
         <div style={{ fontSize: 32 }}>🔒</div>
-        <div style={{ fontSize: 18, fontWeight: 600, color: "var(--ai4u-text-primary)" }}>Acceso restringido</div>
+        <div style={{ fontSize: 18, fontWeight: 600, color: "var(--ai4u-text-primary)" }}>
+          Acceso restringido
+        </div>
         <div style={{ fontSize: 14, color: "var(--ai4u-text-secondary)", maxWidth: 340 }}>
           Este asistente solo es accesible desde Mission Control.
         </div>
       </main>
     )
   }
+
+  return <ChatUI apiKey={apiKey} />
+}
+
+// ─── ChatUI ───────────────────────────────────────────────────────────────────
+function ChatUI({ apiKey }: { apiKey: string }) {
   const [tenantName, setTenantName] = useState("")
-  const [messages, setMessages] = useState<Message[]>([])
-  const [input, setInput] = useState("")
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState("")
-  const bottomRef = useRef<HTMLDivElement>(null)
+  const [inputValue, setInputValue] = useState("")
+  const [search, setSearch] = useState("")
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const bottomRef = useRef<HTMLDivElement>(null)
 
+  // Tier 5: preguntas estratégicas auto-generadas
+  const { suggestions, status: sugStatus, refresh: refreshSuggestions } =
+    useSuggestions(apiKey)
+
+  const {
+    threads,
+    activeThreadId,
+    activeThread,
+    setActiveThreadId,
+    createThread,
+    saveMessages,
+    deleteThread,
+    renameThread,
+  } = useThreads()
+
+  const transport = useMemo(
+    () => new TextStreamChatTransport({ api: "/api/chat", body: { apiKey } }),
+    [apiKey],
+  )
+
+  const { messages, sendMessage, status, stop, setMessages, regenerate, error, clearError } =
+    useChat({ transport })
+
+  const isLoading = status === "submitted" || status === "streaming"
+
+  // Filtro de búsqueda (Tier 4) — busca en título y primer mensaje
+  const filteredThreads = search.trim()
+    ? threads.filter((t) =>
+        t.title.toLowerCase().includes(search.toLowerCase()),
+      )
+    : threads
+
+  // Cargar mensajes al cambiar de hilo
   useEffect(() => {
-    if (!apiKey) return
-    fetch(`${BACKEND_URL}/api/v1/me`, { headers: { "X-API-Key": apiKey } })
-      .then(r => r.ok ? r.json() : null)
-      .then(data => { if (data) setTenantName(data.name ?? data.tenant ?? "") })
-      .catch(() => {})
+    if (!activeThread) return
+    setMessages(activeThread.messages)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [activeThread?.id])
 
+  // Guardar en localStorage cuando termina el streaming
+  useEffect(() => {
+    if (status === "ready" && messages.length > 0 && activeThreadId) {
+      saveMessages(activeThreadId, messages)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status])
+
+  // Nombre del tenant
+  useEffect(() => {
+    fetch(`${BACKEND_URL}/api/v1/me`, { headers: { "X-API-Key": apiKey } })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (d) setTenantName(d.name ?? d.tenant ?? "") })
+      .catch(() => {})
+  }, [apiKey])
+
+  // Scroll al último mensaje
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" })
-  }, [messages, loading])
+  }, [messages, status])
 
-  async function sendMessage() {
-    const text = input.trim()
-    if (!text || loading) return
-    setInput("")
-    setError("")
+  // Auto-resize textarea
+  useEffect(() => {
+    const el = textareaRef.current
+    if (!el) return
+    el.style.height = "auto"
+    el.style.height = `${Math.min(el.scrollHeight, 160)}px`
+  }, [inputValue])
 
-    const next: Message[] = [...messages, { role: "user", content: text }]
-    setMessages([...next, { role: "assistant", content: "" }])
-    setLoading(true)
-
-    try {
-      const res = await fetch(`${BACKEND_URL}/api/v1/chat`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-API-Key": apiKey },
-        body: JSON.stringify({ messages: next }),
-      })
-
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: res.statusText }))
-        throw new Error(err.error ?? res.statusText)
-      }
-
-      const reader = res.body!.getReader()
-      const decoder = new TextDecoder()
-      let accumulated = ""
-
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        accumulated += decoder.decode(value, { stream: true })
-        setMessages([...next, { role: "assistant", content: accumulated }])
-      }
-
-      if (!accumulated) accumulated = "(sin respuesta)"
-      setMessages([...next, { role: "assistant", content: accumulated }])
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      setError(msg)
-      setMessages(next)
-    } finally {
-      setLoading(false)
-      setTimeout(() => textareaRef.current?.focus(), 50)
-    }
+  function handleSend() {
+    const text = inputValue.trim()
+    if (!text || isLoading) return
+    clearError()
+    setInputValue("")
+    sendMessage({ text })
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
       e.preventDefault()
-      sendMessage()
+      handleSend()
     }
+  }
+
+  function switchThread(threadId: string) {
+    if (isLoading) stop()
+    if (messages.length > 0 && activeThreadId) saveMessages(activeThreadId, messages)
+    setActiveThreadId(threadId)
+  }
+
+  function handleNewThread() {
+    if (isLoading) stop()
+    if (messages.length > 0 && activeThreadId) saveMessages(activeThreadId, messages)
+    createThread()
   }
 
   return (
-    <main style={styles.layout}>
-      <header style={styles.header}>
-        <span style={{ fontWeight: 600, fontSize: 16 }}>
-          {tenantName ? `${tenantName} — SAP B1` : "SAP B1 — Asistente"}
-        </span>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <span style={{ fontSize: 12, color: "var(--ai4u-cadet-gray)", fontFamily: "'Necto Mono', monospace" }}>{BACKEND_URL}</span>
-          <button onClick={() => setMessages([])} style={styles.ghostBtn}>
-            Nueva conversación
+    <div style={ss.root}>
+
+      {/* ── Sidebar ─────────────────────────────────────────────── */}
+      <aside style={ss.sidebar}>
+        <div style={ss.sidebarHeader}>
+          <span style={{ fontWeight: 600, fontSize: 13, color: "var(--ai4u-text-primary)" }}>
+            {tenantName || "SAP B1"}
+          </span>
+          <button onClick={handleNewThread} style={ss.newBtn} title="Nueva conversación">
+            +
           </button>
         </div>
-      </header>
 
-      <div style={styles.messages}>
-        {messages.length === 0 && (
-          <div style={styles.empty}>
-            <p style={{ fontSize: 15, color: "var(--ai4u-text-secondary)", marginBottom: 16 }}>
-              Puedes preguntarme sobre datos en SAP, endpoints disponibles o pedirme indicadores.
+        {/* Búsqueda (Tier 4) */}
+        <div style={{ padding: "8px 10px 4px" }}>
+          <input
+            type="search"
+            placeholder="Buscar hilo…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            style={ss.searchInput}
+          />
+        </div>
+
+        <div style={ss.threadList}>
+          {filteredThreads.length === 0 && (
+            <p style={{ fontSize: 12, color: "var(--ai4u-cadet-gray)", padding: "8px 10px" }}>
+              Sin resultados
             </p>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center" }}>
-              {[
-                "¿Cuál fue la facturación total de esta semana?",
-                "Top 5 clientes por facturación en 2026",
-                "Facturación por tecnología en mayo 2026",
-                "¿Qué endpoints necesito para indicadores de ventas?",
-              ].map((s) => (
-                <button
-                  key={s}
-                  style={styles.suggestionBtn}
-                  onClick={() => {
-                    setInput(s)
-                    textareaRef.current?.focus()
-                  }}
-                >
-                  {s}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
+          )}
+          {filteredThreads.map((thread) => (
+            <ThreadItem
+              key={thread.id}
+              thread={thread}
+              isActive={thread.id === activeThreadId}
+              onSelect={() => switchThread(thread.id)}
+              onDelete={() => deleteThread(thread.id)}
+              onRename={(title) => renameThread(thread.id, title)}
+            />
+          ))}
+        </div>
+      </aside>
 
-        {messages.map((msg, i) => (
-          <div key={i} style={msg.role === "user" ? styles.userBubble : styles.aiBubble}>
-            <div style={styles.bubbleLabel}>{msg.role === "user" ? "Tú" : "Asistente"}</div>
-            <div style={styles.bubbleContent}>
-              {msg.content ? (
-                msg.role === "assistant" ? (
-                  <MarkdownContent text={msg.content} />
-                ) : (
-                  msg.content
-                )
-              ) : loading && i === messages.length - 1 ? (
+      {/* ── Área de chat ─────────────────────────────────────────── */}
+      <main style={ss.chat}>
+        <header style={ss.header}>
+          <span style={{ fontWeight: 600, fontSize: 15, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {activeThread?.title ?? "SAP B1 — Asistente"}
+          </span>
+          {/* Export (Tier 4) */}
+          {activeThread && messages.length > 0 && (
+            <button
+              onClick={() => exportAsMarkdown({ ...activeThread, messages })}
+              style={ss.ghostBtn}
+              title="Exportar hilo como Markdown"
+            >
+              ↓ Exportar
+            </button>
+          )}
+        </header>
+
+        <div style={ss.messages}>
+          {messages.length === 0 && status === "ready" && (
+            <SuggestionsPanel
+              suggestions={suggestions}
+              loading={sugStatus === "loading"}
+              onSelect={(s) => sendMessage({ text: s })}
+              onRefresh={refreshSuggestions}
+            />
+          )}
+
+          {messages.map((msg, idx) => {
+            const text = msg.parts.filter(isTextUIPart).map((p) => p.text).join("")
+            const isLastAssistant = idx === messages.length - 1 && msg.role === "assistant"
+            const showThinking = isLastAssistant && !text && status === "streaming"
+
+            return (
+              <MessageBubble
+                key={msg.id}
+                role={msg.role as "user" | "assistant"}
+                text={text}
+                showThinking={showThinking}
+                showRegen={isLastAssistant && !isLoading && !!text}
+                onRegen={() => regenerate()}
+              />
+            )
+          })}
+
+          {status === "submitted" && (
+            <div style={ss.aiBubble}>
+              <div style={ss.bubbleLabel}>Asistente</div>
+              <div style={ss.bubbleContent}>
                 <span style={{ color: "var(--ai4u-cadet-gray)" }}>Pensando…</span>
-              ) : null}
+              </div>
             </div>
-          </div>
-        ))}
+          )}
 
-        {error && <div style={styles.errorBox}>Error: {error}</div>}
-        <div ref={bottomRef} />
-      </div>
+          {error && (
+            <div style={ss.errorBox}>
+              {error.message}
+              <button onClick={clearError} style={ss.errorClose}>✕</button>
+            </div>
+          )}
 
-      <div style={styles.inputArea}>
-        <textarea
-          ref={textareaRef}
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder="Escribe tu pregunta… (Ctrl+Enter para enviar)"
-          rows={3}
-          style={styles.textarea}
-          disabled={loading}
-        />
-        <button
-          onClick={sendMessage}
-          disabled={loading || !input.trim()}
-          style={{ ...styles.primaryBtn, alignSelf: "flex-end", minWidth: 90 }}
-        >
-          {loading ? "…" : "Enviar"}
-        </button>
-      </div>
-    </main>
+          <div ref={bottomRef} />
+        </div>
+
+        <div style={ss.inputArea}>
+          <textarea
+            ref={textareaRef}
+            value={inputValue}
+            onChange={(e) => setInputValue(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="Escribe tu pregunta… (Ctrl+Enter para enviar)"
+            rows={1}
+            style={ss.textarea}
+            disabled={isLoading}
+          />
+          {isLoading ? (
+            <button type="button" onClick={stop} style={{ ...ss.ghostBtn, alignSelf: "flex-end", minWidth: 90 }}>
+              Detener
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={handleSend}
+              disabled={!inputValue.trim()}
+              style={{ ...ss.primaryBtn, alignSelf: "flex-end", minWidth: 90 }}
+            >
+              Enviar
+            </button>
+          )}
+        </div>
+      </main>
+    </div>
   )
 }
 
-function renderInline(text: string): React.ReactNode[] {
-  const parts: React.ReactNode[] = []
-  const re = /(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*)/g
-  let last = 0, m: RegExpExecArray | null, key = 0
-  while ((m = re.exec(text)) !== null) {
-    if (m.index > last) parts.push(text.slice(last, m.index))
-    const tok = m[0]
-    if (tok.startsWith("`"))
-      parts.push(<code key={key++} style={{ background: "var(--ai4u-gray-100)", borderRadius: 3, padding: "1px 5px", fontSize: 12, fontFamily: "'Necto Mono', monospace" }}>{tok.slice(1, -1)}</code>)
-    else if (tok.startsWith("**"))
-      parts.push(<strong key={key++}>{tok.slice(2, -2)}</strong>)
-    else
-      parts.push(<em key={key++}>{tok.slice(1, -1)}</em>)
-    last = m.index + tok.length
-  }
-  if (last < text.length) parts.push(text.slice(last))
-  return parts
-}
+// ─── SuggestionsPanel (Tier 5: preguntas estratégicas auto-generadas) ────────
+function SuggestionsPanel({
+  suggestions,
+  loading,
+  onSelect,
+  onRefresh,
+}: {
+  suggestions: string[]
+  loading: boolean
+  onSelect: (s: string) => void
+  onRefresh: () => void
+}) {
+  return (
+    <div style={ss.empty}>
+      <p style={{ fontSize: 15, color: "var(--ai4u-text-secondary)", marginBottom: 4 }}>
+        Preguntas estratégicas para Tamaprint
+      </p>
+      <p style={{ fontSize: 12, color: "var(--ai4u-cadet-gray)", marginBottom: 16 }}>
+        Generadas por IA · se actualizan cada día
+      </p>
 
-function MarkdownContent({ text }: { text: string }) {
-  const lines = text.split("\n")
-  const nodes: React.ReactNode[] = []
-  let i = 0, key = 0
-
-  while (i < lines.length) {
-    const line = lines[i]
-
-    // fenced code block
-    if (line.startsWith("```")) {
-      const codeLines: string[] = []
-      i++
-      while (i < lines.length && !lines[i].startsWith("```")) { codeLines.push(lines[i]); i++ }
-      nodes.push(
-        <pre key={key++} style={{ background: "var(--ai4u-gray-100)", borderRadius: 6, padding: "10px 12px", margin: "8px 0", overflowX: "auto", fontSize: 12, fontFamily: "'Necto Mono', monospace" }}>
-          <code>{codeLines.join("\n")}</code>
-        </pre>
-      )
-      i++; continue
-    }
-
-    // table
-    if (line.includes("|") && lines[i + 1]?.match(/^[\s|:-]+$/)) {
-      const headers = line.split("|").map(c => c.trim()).filter(Boolean)
-      i += 2
-      const rows: string[][] = []
-      while (i < lines.length && lines[i].includes("|")) {
-        rows.push(lines[i].split("|").map(c => c.trim()).filter(Boolean))
-        i++
-      }
-      nodes.push(
-        <div key={key++} style={{ overflowX: "auto", margin: "8px 0" }}>
-          <table style={{ borderCollapse: "collapse", fontSize: 13, width: "100%" }}>
-            <thead><tr>{headers.map((h, j) => <th key={j} style={{ border: "1px solid var(--ai4u-border-color)", padding: "6px 10px", background: "var(--ai4u-gray-100)", textAlign: "left", fontWeight: 600 }}>{renderInline(h)}</th>)}</tr></thead>
-            <tbody>{rows.map((row, r) => <tr key={r}>{row.map((c, j) => <td key={j} style={{ border: "1px solid var(--ai4u-border-color)", padding: "6px 10px" }}>{renderInline(c)}</td>)}</tr>)}</tbody>
-          </table>
+      {loading ? (
+        /* Skeleton mientras el LLM genera */
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center" }}>
+          {[148, 112, 136, 124].map((w) => (
+            <div
+              key={w}
+              style={{
+                width: w,
+                height: 34,
+                borderRadius: 20,
+                background: "var(--ai4u-border-color)",
+                animation: "pulse 1.4s ease-in-out infinite",
+              }}
+            />
+          ))}
         </div>
-      )
-      continue
-    }
+      ) : (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center" }}>
+          {suggestions.map((s) => (
+            <button key={s} style={ss.suggestionBtn} onClick={() => onSelect(s)}>
+              {s}
+            </button>
+          ))}
+        </div>
+      )}
 
-    // heading
-    const hm = line.match(/^(#{1,3}) (.+)/)
-    if (hm) {
-      const lvl = hm[1].length
-      const s = lvl === 1 ? { fontSize: 16, fontWeight: 700, margin: "12px 0 6px" } : lvl === 2 ? { fontSize: 15, fontWeight: 700, margin: "12px 0 6px" } : { fontSize: 14, fontWeight: 700, margin: "10px 0 4px" }
-      nodes.push(<div key={key++} style={s}>{renderInline(hm[2])}</div>)
-      i++; continue
-    }
-
-    // hr
-    if (line.match(/^---+$/)) {
-      nodes.push(<hr key={key++} style={{ border: "none", borderTop: "1px solid var(--ai4u-border-color)", margin: "10px 0" }} />)
-      i++; continue
-    }
-
-    // blockquote
-    if (line.startsWith("> ")) {
-      nodes.push(
-        <blockquote key={key++} style={{ borderLeft: "3px solid var(--ai4u-border-color)", margin: "6px 0", paddingLeft: 12, color: "var(--ai4u-text-secondary)" }}>
-          {renderInline(line.slice(2))}
-        </blockquote>
-      )
-      i++; continue
-    }
-
-    // unordered list
-    if (line.match(/^[-*] /)) {
-      const items: React.ReactNode[] = []
-      while (i < lines.length && lines[i].match(/^[-*] /)) {
-        items.push(<li key={i} style={{ marginBottom: 2 }}>{renderInline(lines[i].slice(2))}</li>)
-        i++
-      }
-      nodes.push(<ul key={key++} style={{ margin: "4px 0", paddingLeft: 20 }}>{items}</ul>)
-      continue
-    }
-
-    // ordered list
-    if (line.match(/^\d+\. /)) {
-      const items: React.ReactNode[] = []
-      while (i < lines.length && lines[i].match(/^\d+\. /)) {
-        items.push(<li key={i} style={{ marginBottom: 2 }}>{renderInline(lines[i].replace(/^\d+\. /, ""))}</li>)
-        i++
-      }
-      nodes.push(<ol key={key++} style={{ margin: "4px 0", paddingLeft: 20 }}>{items}</ol>)
-      continue
-    }
-
-    // blank line
-    if (line.trim() === "") { i++; continue }
-
-    // paragraph
-    nodes.push(<p key={key++} style={{ margin: "0 0 6px" }}>{renderInline(line)}</p>)
-    i++
-  }
-
-  return <>{nodes}</>
+      <button
+        onClick={onRefresh}
+        disabled={loading}
+        style={{
+          ...ss.microBtn,
+          marginTop: 14,
+          opacity: loading ? 0.4 : 1,
+          cursor: loading ? "default" : "pointer",
+        }}
+      >
+        {loading ? "Generando…" : "↺ Regenerar preguntas"}
+      </button>
+    </div>
+  )
 }
 
-const styles: Record<string, React.CSSProperties> = {
-  layout: {
+// ─── MessageBubble (Tier 4: botón copy por burbuja) ──────────────────────────
+function MessageBubble({
+  role,
+  text,
+  showThinking,
+  showRegen,
+  onRegen,
+}: {
+  role: "user" | "assistant"
+  text: string
+  showThinking: boolean
+  showRegen: boolean
+  onRegen: () => void
+}) {
+  const [copied, setCopied] = useState(false)
+
+  async function copy() {
+    await navigator.clipboard.writeText(text)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1500)
+  }
+
+  return (
+    <div style={role === "user" ? ss.userBubble : ss.aiBubble}>
+      <div style={ss.bubbleLabel}>{role === "user" ? "Tú" : "Asistente"}</div>
+      <div style={ss.bubbleContent}>
+        {role === "assistant" ? (
+          showThinking ? (
+            <span style={{ color: "var(--ai4u-cadet-gray)" }}>Pensando…</span>
+          ) : (
+            <MarkdownContent text={text} />
+          )
+        ) : (
+          text
+        )}
+      </div>
+      {text && (
+        <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+          <button onClick={copy} style={ss.microBtn}>
+            {copied ? "✓ Copiado" : "Copiar"}
+          </button>
+          {showRegen && (
+            <button onClick={onRegen} style={ss.microBtn}>
+              ↺ Regenerar
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── ThreadItem (Tier 4: rename inline con doble-click) ──────────────────────
+function ThreadItem({
+  thread,
+  isActive,
+  onSelect,
+  onDelete,
+  onRename,
+}: {
+  thread: Thread
+  isActive: boolean
+  onSelect: () => void
+  onDelete: () => void
+  onRename: (title: string) => void
+}) {
+  const [hovered, setHovered] = useState(false)
+  const [editing, setEditing] = useState(false)
+  const [editValue, setEditValue] = useState(thread.title)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  function startEdit(e: React.MouseEvent) {
+    e.stopPropagation()
+    setEditValue(thread.title)
+    setEditing(true)
+    setTimeout(() => { inputRef.current?.select() }, 10)
+  }
+
+  function commitEdit() {
+    setEditing(false)
+    onRename(editValue)
+  }
+
+  function handleEditKey(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "Enter") commitEdit()
+    if (e.key === "Escape") setEditing(false)
+  }
+
+  return (
+    <div
+      style={{
+        ...ss.threadItem,
+        background: isActive
+          ? "var(--ai4u-bg-default)"
+          : hovered
+            ? "rgba(0,0,0,0.03)"
+            : "transparent",
+      }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
+      {editing ? (
+        <input
+          ref={inputRef}
+          value={editValue}
+          onChange={(e) => setEditValue(e.target.value)}
+          onBlur={commitEdit}
+          onKeyDown={handleEditKey}
+          style={ss.renameInput}
+        />
+      ) : (
+        <button onClick={onSelect} onDoubleClick={startEdit} style={ss.threadBtn}>
+          <span style={ss.threadTitle}>{thread.title}</span>
+          <span style={ss.threadTime}>{relativeTime(thread.updatedAt)}</span>
+        </button>
+      )}
+
+      {!editing && (isActive || hovered) && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onDelete() }}
+          style={ss.deleteBtn}
+          title="Eliminar hilo"
+        >
+          ✕
+        </button>
+      )}
+    </div>
+  )
+}
+
+// ─── Estilos ───────────────────────────────────────────────────────────────────
+const ss: Record<string, React.CSSProperties> = {
+  root: {
     display: "flex",
-    flexDirection: "column",
     height: "100vh",
     fontFamily: "var(--font-red-hat, 'Red Hat Display', system-ui, sans-serif)",
     background: "var(--ai4u-bg-default)",
+  },
+  lockScreen: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    height: "100vh",
+    background: "var(--ai4u-bg-default)",
+    gap: 16,
+    textAlign: "center",
+    padding: 24,
+  },
+
+  // Sidebar
+  sidebar: {
+    width: 260,
+    flexShrink: 0,
+    background: "var(--ai4u-bg-surface)",
+    borderRight: "1px solid var(--ai4u-border-color)",
+    display: "flex",
+    flexDirection: "column",
+    overflow: "hidden",
+  },
+  sidebarHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    padding: "14px 14px 10px",
+    borderBottom: "1px solid var(--ai4u-border-color)",
+    flexShrink: 0,
+  },
+  newBtn: {
+    background: "var(--ai4u-black)",
+    color: "var(--ai4u-white)",
+    border: "none",
+    borderRadius: 6,
+    width: 28,
+    height: 28,
+    fontSize: 18,
+    lineHeight: "1",
+    cursor: "pointer",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontFamily: "inherit",
+  },
+  searchInput: {
+    width: "100%",
+    padding: "6px 10px",
+    border: "1px solid var(--ai4u-border-color)",
+    borderRadius: 8,
+    fontSize: 12,
+    background: "var(--ai4u-bg-default)",
+    color: "var(--ai4u-text-primary)",
+    fontFamily: "inherit",
+    outline: "none",
+    boxSizing: "border-box" as const,
+  },
+  threadList: {
+    flex: 1,
+    overflowY: "auto",
+    padding: "6px 8px",
+  },
+  threadItem: {
+    display: "flex",
+    alignItems: "center",
+    borderRadius: 8,
+    marginBottom: 2,
+    transition: "background 0.1s",
+  },
+  threadBtn: {
+    flex: 1,
+    background: "transparent",
+    border: "none",
+    cursor: "pointer",
+    padding: "8px 8px",
+    textAlign: "left" as const,
+    fontFamily: "inherit",
+    display: "flex",
+    flexDirection: "column" as const,
+    gap: 2,
+    minWidth: 0,
+  },
+  threadTitle: {
+    fontSize: 13,
+    color: "var(--ai4u-text-primary)",
+    whiteSpace: "nowrap" as const,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    display: "block",
+    maxWidth: 180,
+  },
+  threadTime: {
+    fontSize: 11,
+    color: "var(--ai4u-cadet-gray)",
+  },
+  renameInput: {
+    flex: 1,
+    margin: "4px 6px",
+    padding: "4px 8px",
+    border: "1px solid var(--ai4u-border-color)",
+    borderRadius: 6,
+    fontSize: 13,
+    fontFamily: "inherit",
+    outline: "none",
+    background: "var(--ai4u-bg-default)",
+    color: "var(--ai4u-text-primary)",
+  },
+  deleteBtn: {
+    background: "transparent",
+    border: "none",
+    cursor: "pointer",
+    color: "var(--ai4u-cadet-gray)",
+    fontSize: 12,
+    padding: "4px 8px",
+    borderRadius: 4,
+    flexShrink: 0,
+    fontFamily: "inherit",
+  },
+
+  // Chat
+  chat: {
+    flex: 1,
+    display: "flex",
+    flexDirection: "column",
+    overflow: "hidden",
   },
   header: {
     display: "flex",
     justifyContent: "space-between",
     alignItems: "center",
+    gap: 12,
     padding: "12px 20px",
     background: "var(--ai4u-bg-surface)",
     borderBottom: "1px solid var(--ai4u-border-color)",
@@ -331,7 +658,7 @@ const styles: Record<string, React.CSSProperties> = {
     gap: 16,
   },
   empty: {
-    maxWidth: 600,
+    maxWidth: 560,
     margin: "40px auto",
     textAlign: "center",
   },
@@ -366,22 +693,45 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 600,
     opacity: 0.6,
     marginBottom: 4,
-    textTransform: "uppercase",
+    textTransform: "uppercase" as const,
     letterSpacing: "0.08em",
     fontFamily: "'Necto Mono', monospace",
   },
   bubbleContent: {
     fontSize: 14,
     lineHeight: 1.6,
-    wordBreak: "break-word",
+    wordBreak: "break-word" as const,
+  },
+  microBtn: {
+    background: "transparent",
+    border: "none",
+    color: "var(--ai4u-cadet-gray)",
+    fontSize: 11,
+    cursor: "pointer",
+    padding: "2px 0",
+    fontFamily: "inherit",
   },
   errorBox: {
-    background: "rgba(255, 110, 0, 0.05)",
-    border: "1px solid rgba(255, 110, 0, 0.30)",
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    background: "rgba(255,110,0,0.05)",
+    border: "1px solid rgba(255,110,0,0.30)",
     borderRadius: 8,
     padding: "10px 14px",
     color: "var(--ai4u-orange)",
     fontSize: 13,
+    gap: 8,
+  },
+  errorClose: {
+    background: "transparent",
+    border: "none",
+    color: "var(--ai4u-orange)",
+    cursor: "pointer",
+    fontSize: 13,
+    padding: 0,
+    fontFamily: "inherit",
+    flexShrink: 0,
   },
   inputArea: {
     display: "flex",
@@ -398,12 +748,13 @@ const styles: Record<string, React.CSSProperties> = {
     border: "1px solid var(--ai4u-border-color)",
     borderRadius: 10,
     fontSize: 14,
-    resize: "none",
+    resize: "none" as const,
     fontFamily: "inherit",
     lineHeight: 1.5,
     outline: "none",
     background: "var(--ai4u-bg-default)",
     color: "var(--ai4u-text-primary)",
+    overflow: "hidden",
   },
   primaryBtn: {
     background: "var(--ai4u-black)",
@@ -425,5 +776,6 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 13,
     cursor: "pointer",
     fontFamily: "inherit",
+    whiteSpace: "nowrap" as const,
   },
 }

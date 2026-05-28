@@ -51,3 +51,8 @@ body {
   font-family: 'Red Hat Display', system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}
