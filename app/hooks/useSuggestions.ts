@@ -43,7 +43,7 @@ function pruneOldCacheKeys() {
 
 export type SuggestionsStatus = "idle" | "loading" | "ready" | "error"
 
-export function useSuggestions(apiKey: string) {
+export function useSuggestions(apiKey: string, tenantName?: string) {
   const [suggestions, setSuggestions] = useState<string[]>([])
   const [status, setStatus] = useState<SuggestionsStatus>("idle")
 
@@ -66,7 +66,7 @@ export function useSuggestions(apiKey: string) {
         const res = await fetch("/api/suggestions", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ apiKey }),
+          body: JSON.stringify({ apiKey, tenantName }),
           signal: AbortSignal.timeout(30_000),
         })
 
@@ -91,7 +91,7 @@ export function useSuggestions(apiKey: string) {
         }
       }
     },
-    [apiKey],
+    [apiKey, tenantName],
   )
 
   useEffect(() => {

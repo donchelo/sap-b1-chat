@@ -142,7 +142,7 @@ function ChatUI({ apiKey }: { apiKey: string }) {
   const bottomRef = useRef<HTMLDivElement>(null)
 
   const { suggestions, status: sugStatus, refresh: refreshSuggestions } =
-    useSuggestions(apiKey)
+    useSuggestions(apiKey, tenantName)
 
   const {
     threads,
@@ -374,6 +374,7 @@ function ChatUI({ apiKey }: { apiKey: string }) {
             <SuggestionsPanel
               suggestions={suggestions}
               loading={sugStatus === "loading"}
+              tenantName={tenantName}
               onSelect={(s) => sendMessage({ text: s })}
               onRefresh={refreshSuggestions}
             />
@@ -466,18 +467,20 @@ function ChatUI({ apiKey }: { apiKey: string }) {
 function SuggestionsPanel({
   suggestions,
   loading,
+  tenantName,
   onSelect,
   onRefresh,
 }: {
   suggestions: string[]
   loading: boolean
+  tenantName: string
   onSelect: (s: string) => void
   onRefresh: () => void
 }) {
   return (
     <div style={ss.empty}>
       <p style={{ fontSize: 15, color: "var(--ai4u-text-secondary)", marginBottom: 4 }}>
-        Preguntas estratégicas para Tamaprint
+        Preguntas estratégicas{tenantName ? ` para ${tenantName}` : ""}
       </p>
       <p style={{ fontSize: 12, color: "var(--ai4u-cadet-gray)", marginBottom: 16 }}>
         Generadas por IA · se actualizan cada día

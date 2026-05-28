@@ -1,5 +1,5 @@
 // ─── /api/suggestions ────────────────────────────────────────────────────────
-// Genera 4 preguntas estratégicas de negocio para el dueño de Tamaprint,
+// Genera 4 preguntas estratégicas de negocio para el tenant activo,
 // usando el mismo backend de SAP B1 como LLM (no requiere nueva API key).
 //
 // POST { apiKey: string }
@@ -11,7 +11,6 @@ const BACKEND_URL =
   process.env.NEXT_PUBLIC_BACKEND_URL ??
   "http://localhost:4100"
 
-// Preguntas de respaldo si el LLM falla
 const FALLBACK: string[] = [
   "¿Cuál es el margen bruto por línea de producto este mes vs. el mes anterior?",
   "¿Qué clientes no han comprado en los últimos 60 días y tienen historial alto?",
@@ -19,10 +18,10 @@ const FALLBACK: string[] = [
   "¿Cuáles son los 5 productos con mayor crecimiento de demanda en el último trimestre?",
 ]
 
-function buildPrompt(today: string): string {
-  return `Eres un consultor estratégico especializado en empresas de impresión y producción gráfica, con expertise en SAP Business One.
+function buildPrompt(today: string, tenantName: string): string {
+  return `Eres un consultor estratégico con expertise en SAP Business One.
 
-La empresa es Tamaprint. Tu tarea es generar 4 preguntas estratégicas de alto valor que el dueño debería hacerle al sistema SAP hoy (${today}).
+La empresa es ${tenantName}. Tu tarea es generar 4 preguntas estratégicas de alto valor que el dueño debería hacerle al sistema SAP hoy (${today}).
 
 Cubre exactamente estas categorías, una por pregunta:
 1. FINANZAS: márgenes, rentabilidad, flujo de caja, cuentas por cobrar/pagar
@@ -32,7 +31,7 @@ Cubre exactamente estas categorías, una por pregunta:
 
 Criterios:
 - Cada pregunta debe ser respondible con datos reales de SAP B1
-- Deben ser específicas para una empresa de impresión (no genéricas)
+- Deben ser específicas para el giro de ${tenantName} (no genéricas)
 - Deben generar insights accionables para tomar decisiones esta semana
 - Varía el horizonte temporal entre preguntas (hoy, semana, mes, trimestre)
 
@@ -59,11 +58,13 @@ function parseQuestions(raw: string): string[] | null {
 
 export async function POST(req: Request) {
   const body = await req.json().catch(() => ({}))
-  const { apiKey } = body as { apiKey?: string }
+  const { apiKey, tenantName } = body as { apiKey?: string; tenantName?: string }
 
   if (!apiKey) {
     return Response.json({ error: "apiKey requerido" }, { status: 401 })
   }
+
+  const resolvedTenant = tenantName?.trim() || "la empresa"
 
   const today = new Date().toLocaleDateString("es", {
     weekday: "long",
@@ -83,7 +84,7 @@ export async function POST(req: Request) {
         "X-API-Key": apiKey,
       },
       body: JSON.stringify({
-        messages: [{ role: "user", content: buildPrompt(today) }],
+        messages: [{ role: "user", content: buildPrompt(today, resolvedTenant) }],
       }),
       signal: AbortSignal.timeout(25_000),
     })
