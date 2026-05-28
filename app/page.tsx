@@ -71,6 +71,33 @@ function estimateTokens(msgs: ReturnType<typeof useChat>["messages"]): number {
   )
 }
 
+// ─── Hook: cronómetro para tool calls pendientes ──────────────────────────────
+function useElapsed(active: boolean): number {
+  const [elapsed, setElapsed] = useState(0)
+  const startRef = useRef<number | null>(null)
+  useEffect(() => {
+    if (!active) { startRef.current = null; setElapsed(0); return }
+    startRef.current = Date.now()
+    const id = setInterval(() => {
+      if (startRef.current !== null) setElapsed(Math.floor((Date.now() - startRef.current) / 1000))
+    }, 500)
+    return () => clearInterval(id)
+  }, [active])
+  return elapsed
+}
+
+// ─── TypingIndicator ──────────────────────────────────────────────────────────
+function TypingIndicator() {
+  return (
+    <div className="ai-bubble">
+      <div style={ss.bubbleLabel}>Asistente</div>
+      <div className="typing-dots">
+        <span /><span /><span />
+      </div>
+    </div>
+  )
+}
+
 // ─── Root: gate de acceso ─────────────────────────────────────────────────────
 export default function ChatPage() {
   const [apiKey] = useState(getInitialApiKey)
@@ -309,6 +336,9 @@ function ChatUI({ apiKey }: { apiKey: string }) {
           </div>
         </header>
 
+        {/* ── Barra de progreso indeterminada ─────────────────────── */}
+        {isLoading && <div className="chat-progress-bar" />}
+
         <div className="chat-messages">
           {messages.length === 0 && status === "ready" && (
             <SuggestionsPanel
@@ -340,14 +370,7 @@ function ChatUI({ apiKey }: { apiKey: string }) {
             )
           })}
 
-          {status === "submitted" && (
-            <div className="ai-bubble">
-              <div style={ss.bubbleLabel}>Asistente</div>
-              <div style={ss.bubbleContent}>
-                <span style={{ color: "var(--ai4u-cadet-gray)" }}>Pensando…</span>
-              </div>
-            </div>
-          )}
+          {status === "submitted" && <TypingIndicator />}
 
           {error && (
             <div style={ss.errorBox}>
@@ -358,6 +381,23 @@ function ChatUI({ apiKey }: { apiKey: string }) {
 
           <div ref={bottomRef} />
         </div>
+
+        {/* ── Status strip ────────────────────────────────────────── */}
+        {isLoading && (
+          <div style={ss.statusStrip}>
+            <span style={{
+              width: 6, height: 6, borderRadius: "50%", flexShrink: 0, display: "inline-block",
+              background: status === "submitted" ? "var(--ai4u-orange)" : "var(--ai4u-blue)",
+              animation: "pulse 1s ease-in-out infinite",
+            }} />
+            <span>
+              {status === "submitted" ? "Enviando a SAP B1…" : "Recibiendo respuesta…"}
+            </span>
+            <span style={{ marginLeft: "auto", opacity: 0.6 }}>
+              Ctrl+Enter para cancelar
+            </span>
+          </div>
+        )}
 
         <div className="chat-input-area">
           <textarea
@@ -371,8 +411,8 @@ function ChatUI({ apiKey }: { apiKey: string }) {
             disabled={isLoading}
           />
           {isLoading ? (
-            <button type="button" onClick={stop} style={{ ...ss.ghostBtn, alignSelf: "flex-end", minWidth: 90 }}>
-              Detener
+            <button type="button" onClick={stop} style={{ ...ss.stopBtn, alignSelf: "flex-end", minWidth: 90 }}>
+              ■ Detener
             </button>
           ) : (
             <button
@@ -437,7 +477,6 @@ function ToolCallStep({ part }: { part: ReturnType<typeof useChat>["messages"][n
 
   const name = getToolName(part)
   const label = TOOL_LABELS[name] ?? name
-  // Access state/output via cast since tools are dynamic
   const inv = part as unknown as {
     state: string
     input?: unknown
@@ -445,9 +484,10 @@ function ToolCallStep({ part }: { part: ReturnType<typeof useChat>["messages"][n
     errorText?: string
   }
 
-  const isDone  = inv.state === "output-available"
-  const isError = inv.state === "output-error"
+  const isDone    = inv.state === "output-available"
+  const isError   = inv.state === "output-error"
   const isPending = !isDone && !isError
+  const elapsed   = useElapsed(isPending)
 
   return (
     <div style={ss.toolStep}>
@@ -456,13 +496,13 @@ function ToolCallStep({ part }: { part: ReturnType<typeof useChat>["messages"][n
         onClick={() => isDone && setExpanded((v) => !v)}
         disabled={!isDone}
       >
-        <span style={{ color: isError ? "var(--ai4u-orange)" : isDone ? "var(--ai4u-text-secondary)" : "var(--ai4u-cadet-gray)" }}>
-          {isError ? "✗" : isDone ? "✓" : "·"}
+        <span style={{ color: isError ? "var(--ai4u-orange)" : isDone ? "var(--ai4u-text-secondary)" : "var(--ai4u-cadet-gray)", animation: isPending ? "pulse 1.4s ease-in-out infinite" : undefined }}>
+          {isError ? "✗" : isDone ? "✓" : "●"}
         </span>
         <span style={{ flex: 1, textAlign: "left" as const }}>{label}</span>
-        {isPending && (
-          <span style={{ fontSize: 10, color: "var(--ai4u-cadet-gray)", animation: "pulse 1.4s ease-in-out infinite" }}>
-            …
+        {isPending && elapsed > 0 && (
+          <span style={{ fontSize: 10, color: "var(--ai4u-cadet-gray)", fontFamily: "'Necto Mono', monospace" }}>
+            {elapsed}s
           </span>
         )}
         {isDone && (
@@ -565,7 +605,7 @@ function MessageBubble({
       <div style={ss.bubbleContent}>
         {role === "assistant" ? (
           showThinking ? (
-            <span style={{ color: "var(--ai4u-cadet-gray)" }}>Pensando…</span>
+            <div className="typing-dots"><span /><span /><span /></div>
           ) : (
             <MarkdownContent text={text} />
           )
@@ -670,6 +710,8 @@ const ss: Record<string, React.CSSProperties> = {
   textarea: { flex: 1, padding: "10px 14px", border: "1px solid var(--ai4u-border-color)", borderRadius: 10, fontSize: 14, resize: "none" as const, fontFamily: "inherit", lineHeight: 1.5, outline: "none", background: "var(--ai4u-bg-default)", color: "var(--ai4u-text-primary)", overflow: "hidden" },
   primaryBtn: { background: "var(--ai4u-black)", color: "var(--ai4u-white)", border: "none", borderRadius: 8, padding: "10px 18px", fontSize: 14, cursor: "pointer", fontWeight: 500, fontFamily: "inherit" },
   ghostBtn: { background: "transparent", color: "var(--ai4u-text-secondary)", border: "1px solid var(--ai4u-border-color)", borderRadius: 8, padding: "6px 12px", fontSize: 13, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" as const },
+  stopBtn: { background: "rgba(255,110,0,0.08)", color: "var(--ai4u-orange)", border: "1px solid rgba(255,110,0,0.30)", borderRadius: 8, padding: "10px 18px", fontSize: 14, cursor: "pointer", fontWeight: 500, fontFamily: "inherit", whiteSpace: "nowrap" as const },
+  statusStrip: { display: "flex", alignItems: "center", gap: 7, padding: "5px 20px", fontSize: 11, color: "var(--ai4u-cadet-gray)", background: "var(--ai4u-bg-surface)", borderTop: "1px solid var(--ai4u-border-color)", flexShrink: 0 },
   versionBadge: { background: "transparent", color: "var(--ai4u-cadet-gray)", border: "1px solid var(--ai4u-border-color)", borderRadius: 6, padding: "3px 8px", fontSize: 11, cursor: "pointer", fontFamily: "'Necto Mono', monospace", whiteSpace: "nowrap" as const, flexShrink: 0 },
 
   // Tool steps
