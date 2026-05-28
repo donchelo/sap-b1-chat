@@ -10,8 +10,11 @@ import {
 } from "ai"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { MarkdownContent } from "./components/MarkdownContent"
+import { ChangelogModal } from "./components/ChangelogModal"
 import { useThreads, type Thread } from "./hooks/useThreads"
 import { useSuggestions } from "./hooks/useSuggestions"
+
+const APP_VERSION = "0.1.0"
 
 const BACKEND_URL =
   process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:4100"
@@ -93,6 +96,7 @@ function ChatUI({ apiKey }: { apiKey: string }) {
   const [inputValue, setInputValue] = useState("")
   const [search, setSearch] = useState("")
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [showChangelog, setShowChangelog] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
 
@@ -213,6 +217,10 @@ function ChatUI({ apiKey }: { apiKey: string }) {
   return (
     <div className="chat-root">
 
+      {showChangelog && (
+        <ChangelogModal version={APP_VERSION} onClose={() => setShowChangelog(false)} />
+      )}
+
       {/* ── Backdrop móvil ──────────────────────────────────────── */}
       <div
         className={`sidebar-backdrop${sidebarOpen ? " is-open" : ""}`}
@@ -291,6 +299,13 @@ function ChatUI({ apiKey }: { apiKey: string }) {
                 ↓ Exportar
               </button>
             )}
+            <button
+              onClick={() => setShowChangelog(true)}
+              style={ss.versionBadge}
+              title="Ver historial de cambios"
+            >
+              v{APP_VERSION}
+            </button>
           </div>
         </header>
 
@@ -655,6 +670,7 @@ const ss: Record<string, React.CSSProperties> = {
   textarea: { flex: 1, padding: "10px 14px", border: "1px solid var(--ai4u-border-color)", borderRadius: 10, fontSize: 14, resize: "none" as const, fontFamily: "inherit", lineHeight: 1.5, outline: "none", background: "var(--ai4u-bg-default)", color: "var(--ai4u-text-primary)", overflow: "hidden" },
   primaryBtn: { background: "var(--ai4u-black)", color: "var(--ai4u-white)", border: "none", borderRadius: 8, padding: "10px 18px", fontSize: 14, cursor: "pointer", fontWeight: 500, fontFamily: "inherit" },
   ghostBtn: { background: "transparent", color: "var(--ai4u-text-secondary)", border: "1px solid var(--ai4u-border-color)", borderRadius: 8, padding: "6px 12px", fontSize: 13, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" as const },
+  versionBadge: { background: "transparent", color: "var(--ai4u-cadet-gray)", border: "1px solid var(--ai4u-border-color)", borderRadius: 6, padding: "3px 8px", fontSize: 11, cursor: "pointer", fontFamily: "'Necto Mono', monospace", whiteSpace: "nowrap" as const, flexShrink: 0 },
 
   // Tool steps
   toolStepList: { display: "flex", flexDirection: "column" as const, gap: 4, marginBottom: 10, borderLeft: "2px solid var(--ai4u-border-color)", paddingLeft: 10 },
