@@ -5,6 +5,8 @@ const BACKEND_URL =
   process.env.NEXT_PUBLIC_BACKEND_URL ??
   "http://localhost:4100"
 
+const PROXY_TIMEOUT_MS = 120_000 // 2 min — ajusta si SAP tarda más
+
 export async function POST(req: Request) {
   const body = await req.json()
   const { messages, apiKey } = body
@@ -16,16 +18,31 @@ export async function POST(req: Request) {
   // UIMessage[] → ModelMessage[] (preserva tool calls, tool results, etc.)
   const modelMessages = await convertToModelMessages(messages)
 
-  const upstream = await fetch(`${BACKEND_URL}/api/v1/chat`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-API-Key": apiKey,
-      // Tell the backend this client expects the UI message stream protocol
-      "x-vercel-ai-ui-message-stream": "v1",
-    },
-    body: JSON.stringify({ messages: modelMessages }),
-  })
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), PROXY_TIMEOUT_MS)
+
+  let upstream: Response
+  try {
+    upstream = await fetch(`${BACKEND_URL}/api/v1/chat`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-API-Key": apiKey,
+        // Tell the backend this client expects the UI message stream protocol
+        "x-vercel-ai-ui-message-stream": "v1",
+      },
+      body: JSON.stringify({ messages: modelMessages }),
+      signal: controller.signal,
+    })
+  } catch (err) {
+    clearTimeout(timeoutId)
+    const isAbort = err instanceof Error && err.name === "AbortError"
+    const message = isAbort
+      ? `Tiempo de espera agotado (>${PROXY_TIMEOUT_MS / 1000}s) — el backend no respondió`
+      : `Backend no disponible (${BACKEND_URL}) — verifique que el servicio esté activo`
+    return Response.json({ error: message }, { status: isAbort ? 504 : 502 })
+  }
+  clearTimeout(timeoutId)
 
   if (!upstream.ok) {
     const err = await upstream.json().catch(() => ({ error: upstream.statusText }))

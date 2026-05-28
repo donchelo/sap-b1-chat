@@ -100,7 +100,15 @@ function TypingIndicator() {
 
 // ─── Root: gate de acceso ─────────────────────────────────────────────────────
 export default function ChatPage() {
-  const [apiKey] = useState(getInitialApiKey)
+  const [apiKey, setApiKey] = useState("")
+  const [mounted, setMounted] = useState(false)
+
+  useEffect(() => {
+    setApiKey(getInitialApiKey())
+    setMounted(true)
+  }, [])
+
+  if (!mounted) return null
   if (!apiKey) {
     return (
       <main style={ss.lockScreen}>
@@ -125,6 +133,12 @@ function ChatUI({ apiKey }: { apiKey: string }) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [showChangelog, setShowChangelog] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  // Auto-show changelog when the app version is newer than the last seen version
+  useEffect(() => {
+    const lastSeen = localStorage.getItem("changelog:lastSeen")
+    if (lastSeen !== APP_VERSION) setShowChangelog(true)
+  }, [])
   const bottomRef = useRef<HTMLDivElement>(null)
 
   const { suggestions, status: sugStatus, refresh: refreshSuggestions } =
@@ -150,6 +164,7 @@ function ChatUI({ apiKey }: { apiKey: string }) {
     useChat({ transport })
 
   const isLoading = status === "submitted" || status === "streaming"
+  const submittedElapsed = useElapsed(status === "submitted")
 
   const tokenEstimate = useMemo(() => estimateTokens(messages), [messages])
 
@@ -254,7 +269,13 @@ function ChatUI({ apiKey }: { apiKey: string }) {
     <div className="chat-root">
 
       {showChangelog && (
-        <ChangelogModal version={APP_VERSION} onClose={() => setShowChangelog(false)} />
+        <ChangelogModal
+          version={APP_VERSION}
+          onClose={() => {
+            localStorage.setItem("changelog:lastSeen", APP_VERSION)
+            setShowChangelog(false)
+          }}
+        />
       )}
 
       {/* ── Backdrop móvil ──────────────────────────────────────── */}
@@ -401,7 +422,7 @@ function ChatUI({ apiKey }: { apiKey: string }) {
             }} />
             <span>
               {status === "submitted"
-                ? "Enviando a SAP B1…"
+                ? submittedElapsed < 3 ? "Conectando al backend…" : "Esperando respuesta de SAP B1…"
                 : liveStatusText ?? "Recibiendo respuesta…"}
             </span>
             <span style={{ marginLeft: "auto", opacity: 0.6 }}>
