@@ -21,6 +21,8 @@ export async function POST(req: Request) {
     headers: {
       "Content-Type": "application/json",
       "X-API-Key": apiKey,
+      // Tell the backend this client expects the UI message stream protocol
+      "x-vercel-ai-ui-message-stream": "v1",
     },
     body: JSON.stringify({ messages: modelMessages }),
   })
@@ -33,12 +35,58 @@ export async function POST(req: Request) {
     )
   }
 
-  // Pasar el UI message stream con los headers correctos del upstream
-  const responseHeaders = new Headers()
-  const contentType = upstream.headers.get("Content-Type")
-  if (contentType) responseHeaders.set("Content-Type", contentType)
+  const upstreamContentType = upstream.headers.get("Content-Type") ?? ""
+  const isUIMessageStream =
+    upstream.headers.has("x-vercel-ai-ui-message-stream") ||
+    upstreamContentType.includes("text/event-stream")
+
+  const responseHeaders = new Headers({
+    "Content-Type": "text/event-stream; charset=utf-8",
+    "Cache-Control": "no-cache",
+    "x-vercel-ai-ui-message-stream": "v1",
+  })
   const sessionId = upstream.headers.get("X-Session-Id")
   if (sessionId) responseHeaders.set("X-Session-Id", sessionId)
 
-  return new Response(upstream.body, { headers: responseHeaders })
+  // New backend: already emits the UI message stream protocol → pass through
+  if (isUIMessageStream) {
+    return new Response(upstream.body, { headers: responseHeaders })
+  }
+
+  // Legacy backend: plain text stream → wrap as minimal UI message stream
+  // so DefaultChatTransport (parseJsonEventStream) can consume it.
+  const textId = crypto.randomUUID()
+  const enc = new TextEncoder()
+
+  function sseEvent(chunk: Record<string, unknown>): Uint8Array {
+    return enc.encode(`data: ${JSON.stringify(chunk)}\n\n`)
+  }
+
+  const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>()
+  const writer = writable.getWriter()
+
+  ;(async () => {
+    try {
+      writer.write(sseEvent({ type: "start-step" }))
+      writer.write(sseEvent({ type: "text-start", id: textId }))
+
+      const reader = upstream.body!.getReader()
+      const dec = new TextDecoder()
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        const delta = dec.decode(value, { stream: true })
+        if (delta) writer.write(sseEvent({ type: "text-delta", id: textId, delta }))
+      }
+
+      writer.write(sseEvent({ type: "text-end", id: textId }))
+      writer.write(sseEvent({ type: "finish-step" }))
+    } catch {
+      // stream aborted by client — nothing to do
+    } finally {
+      writer.close()
+    }
+  })()
+
+  return new Response(readable, { headers: responseHeaders })
 }
