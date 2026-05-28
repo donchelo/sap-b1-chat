@@ -9,7 +9,7 @@ interface ChangelogEntry {
 }
 
 interface ChangelogData {
-  currentVersion: string
+  total: number
   entries: ChangelogEntry[]
 }
 
