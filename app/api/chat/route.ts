@@ -1,4 +1,5 @@
 import { convertToModelMessages } from "ai"
+import { getApiKey } from "@/app/lib/session"
 
 const BACKEND_URL =
   process.env.BACKEND_URL ??
@@ -8,12 +9,14 @@ const BACKEND_URL =
 const PROXY_TIMEOUT_MS = 120_000 // 2 min — ajusta si SAP tarda más
 
 export async function POST(req: Request) {
-  const body = await req.json()
-  const { messages, apiKey } = body
-
+  // API key is resolved server-side from the session cookie — never from the client body
+  const apiKey = await getApiKey()
   if (!apiKey) {
-    return Response.json({ error: "apiKey requerido" }, { status: 401 })
+    return Response.json({ error: "Sesión no válida. Accede desde Mission Control." }, { status: 401 })
   }
+
+  const body = await req.json()
+  const { messages } = body
 
   // UIMessage[] → ModelMessage[] (preserva tool calls, tool results, etc.)
   const modelMessages = await convertToModelMessages(messages)

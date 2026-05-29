@@ -57,14 +57,17 @@ function parseQuestions(raw: string): string[] | null {
 }
 
 export async function POST(req: Request) {
-  const body = await req.json().catch(() => ({}))
-  const { apiKey, tenantName } = body as { apiKey?: string; tenantName?: string }
+  // API key resolved server-side from session cookie
+  const { getApiKey, getTenantId } = await import("@/app/lib/session")
+  const [apiKey, tenantId] = await Promise.all([getApiKey(), getTenantId()])
 
   if (!apiKey) {
-    return Response.json({ error: "apiKey requerido" }, { status: 401 })
+    return Response.json({ error: "Sesión no válida. Accede desde Mission Control." }, { status: 401 })
   }
 
-  const resolvedTenant = tenantName?.trim() || "la empresa"
+  const body = await req.json().catch(() => ({}))
+  const { tenantName } = body as { tenantName?: string }
+  const resolvedTenant = tenantName?.trim() || tenantId || "la empresa"
 
   const today = new Date().toLocaleDateString("es", {
     weekday: "long",

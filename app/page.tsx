@@ -33,10 +33,7 @@ const TOOL_LABELS: Record<string, string> = {
 const CTX_WARN  = 120_000
 const CTX_LIMIT = 180_000
 
-function getInitialApiKey(): string {
-  if (typeof window === "undefined") return ""
-  return new URLSearchParams(window.location.search).get("apiKey") ?? ""
-}
+// No longer reads apiKey from URL — session is managed server-side via /api/mc-auth
 
 function relativeTime(ts: number): string {
   const min = Math.floor((Date.now() - ts) / 60000)
@@ -101,16 +98,17 @@ function TypingIndicator() {
 
 // ─── Root: gate de acceso ─────────────────────────────────────────────────────
 export default function ChatPage() {
-  const [apiKey, setApiKey] = useState("")
-  const [mounted, setMounted] = useState(false)
+  const [ready, setReady]   = useState<boolean | null>(null) // null = loading
 
   useEffect(() => {
-    setApiKey(getInitialApiKey())
-    setMounted(true)
+    // Verify session exists server-side (returns 401 if no valid session cookie)
+    fetch("/api/me", { cache: "no-store" })
+      .then(r => setReady(r.ok))
+      .catch(() => setReady(false))
   }, [])
 
-  if (!mounted) return null
-  if (!apiKey) {
+  if (ready === null) return null // loading
+  if (!ready) {
     return (
       <main style={ss.lockScreen}>
         <div style={{ fontSize: 32 }}>🔒</div>
@@ -123,11 +121,12 @@ export default function ChatPage() {
       </main>
     )
   }
-  return <ChatUI apiKey={apiKey} />
+  return <ChatUI />
 }
 
 // ─── ChatUI ───────────────────────────────────────────────────────────────────
-function ChatUI({ apiKey }: { apiKey: string }) {
+function ChatUI() {
+  const apiKey = "" // kept for hook compat — API key is now server-side only
   const [tenantName, setTenantName] = useState("")
   const [inputValue, setInputValue] = useState("")
   const [search, setSearch] = useState("")
@@ -143,7 +142,7 @@ function ChatUI({ apiKey }: { apiKey: string }) {
   const bottomRef = useRef<HTMLDivElement>(null)
 
   const { suggestions, status: sugStatus, refresh: refreshSuggestions } =
-    useSuggestions(apiKey, tenantName)
+    useSuggestions(tenantName)
 
   const {
     threads,
@@ -157,8 +156,8 @@ function ChatUI({ apiKey }: { apiKey: string }) {
   } = useThreads()
 
   const transport = useMemo(
-    () => new DefaultChatTransport({ api: "/api/chat", body: { apiKey } }),
-    [apiKey],
+    () => new DefaultChatTransport({ api: "/api/chat" }),
+    [],
   )
 
   const { messages, sendMessage, status, stop, setMessages, regenerate, error, clearError } =
@@ -201,13 +200,13 @@ function ChatUI({ apiKey }: { apiKey: string }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status])
 
-  // Nombre del tenant
+  // Nombre del tenant — server-side proxy reads API key from session cookie
   useEffect(() => {
-    fetch(`${BACKEND_URL}/api/v1/me`, { headers: { "X-API-Key": apiKey } })
+    fetch("/api/me", { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => { if (d) setTenantName(d.name ?? d.tenant ?? "") })
       .catch(() => {})
-  }, [apiKey])
+  }, [])
 
   // Scroll al último mensaje
   useEffect(() => {
