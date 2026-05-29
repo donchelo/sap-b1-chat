@@ -16,7 +16,7 @@ export async function POST(req: Request) {
   }
 
   const body = await req.json()
-  const { messages } = body
+  const { messages, model } = body
 
   // UIMessage[] → ModelMessage[] (preserva tool calls, tool results, etc.)
   const modelMessages = await convertToModelMessages(messages)
@@ -34,7 +34,7 @@ export async function POST(req: Request) {
         // Tell the backend this client expects the UI message stream protocol
         "x-vercel-ai-ui-message-stream": "v1",
       },
-      body: JSON.stringify({ messages: modelMessages }),
+      body: JSON.stringify({ messages: modelMessages, model }),
       signal: controller.signal,
     })
   } catch (err) {

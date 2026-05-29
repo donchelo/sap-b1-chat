@@ -27,6 +27,15 @@ const TOOL_LABELS: Record<string, string> = {
   ejecutar_accion:     "Ejecutando acción",
 }
 
+type ModelId = "claude-haiku-4-5" | "claude-sonnet-4-6" | "claude-opus-4-8"
+const DEFAULT_MODEL: ModelId = "claude-sonnet-4-6"
+
+const MODEL_OPTIONS: Array<{ id: ModelId; label: string; description: string; ctxK: number }> = [
+  { id: "claude-haiku-4-5",  label: "Rápido",         description: "Claude Haiku 4.5 — consultas simples y rápidas, menor costo",                ctxK: 200  },
+  { id: "claude-sonnet-4-6", label: "Balanceado",      description: "Claude Sonnet 4.6 — ideal para la mayoría de consultas SAP (predeterminado)", ctxK: 1000 },
+  { id: "claude-opus-4-8",   label: "Máxima IA ⚡",    description: "Claude Opus 4.8 — análisis complejos y razonamiento profundo. Más costoso.",   ctxK: 1000 },
+]
+
 // Context limit: Claude Sonnet 200k tokens. Alert zones:
 const CTX_WARN  = 120_000
 const CTX_LIMIT = 180_000
@@ -129,6 +138,7 @@ function ChatUI() {
   const [inputValue, setInputValue] = useState("")
   const [search, setSearch] = useState("")
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [selectedModel, setSelectedModel] = useState<ModelId>(DEFAULT_MODEL)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
 
@@ -147,8 +157,8 @@ function ChatUI() {
   } = useThreads()
 
   const transport = useMemo(
-    () => new DefaultChatTransport({ api: "/api/chat" }),
-    [],
+    () => new DefaultChatTransport({ api: "/api/chat", body: { model: selectedModel } }),
+    [selectedModel],
   )
 
   const { messages, sendMessage, status, stop, setMessages, regenerate, error, clearError } =
@@ -175,6 +185,14 @@ function ChatUI() {
   const filteredThreads = search.trim()
     ? threads.filter((t) => t.title.toLowerCase().includes(search.toLowerCase()))
     : threads
+
+  // Resync mensajes cuando cambia el modelo (transport se recrea, useChat puede resetear)
+  const activeThreadRef = useRef(activeThread)
+  activeThreadRef.current = activeThread
+  useEffect(() => {
+    if (activeThreadRef.current) setMessages(activeThreadRef.current.messages)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [transport])
 
   // Cargar mensajes al cambiar de hilo
   useEffect(() => {
@@ -324,7 +342,7 @@ function ChatUI() {
             {/* Token indicator */}
             {messages.length > 0 && (
               <span style={{ fontSize: 11, color: tokenColor, fontFamily: TYPOGRAPHY_TOKENS.fontFamily.code }}
-                title={`~${tokenEstimate.toLocaleString()} tokens estimados de 200k`}>
+                title={`~${tokenEstimate.toLocaleString()} tokens estimados de ${MODEL_OPTIONS.find(m => m.id === selectedModel)?.ctxK ?? 1000}k`}>
                 ~{tokenEstimate > 1000 ? `${Math.round(tokenEstimate / 1000)}k` : tokenEstimate}t
               </span>
             )}
@@ -420,6 +438,37 @@ function ChatUI() {
         )}
 
         <div className="chat-input-area">
+          <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" as const, marginBottom: 6 }}>
+            <span style={{ fontSize: 11, color: "var(--ai4u-cadet-gray)", flexShrink: 0 }}>Modelo:</span>
+            {MODEL_OPTIONS.map((opt) => (
+              <button
+                key={opt.id}
+                onClick={() => setSelectedModel(opt.id)}
+                disabled={isLoading}
+                title={opt.description}
+                style={{
+                  background: selectedModel === opt.id ? "var(--ai4u-black)" : "transparent",
+                  color: selectedModel === opt.id ? "var(--ai4u-white)" : "var(--ai4u-text-secondary)",
+                  border: selectedModel === opt.id ? "1px solid var(--ai4u-black)" : "1px solid var(--ai4u-border-color)",
+                  borderRadius: 6,
+                  padding: "3px 9px",
+                  fontSize: 11,
+                  cursor: isLoading ? "default" : "pointer",
+                  fontFamily: "inherit",
+                  opacity: isLoading ? 0.5 : 1,
+                  whiteSpace: "nowrap" as const,
+                  transition: "background 0.15s, color 0.15s",
+                }}
+              >
+                {opt.label}
+              </button>
+            ))}
+            {selectedModel === "claude-opus-4-8" && (
+              <span style={{ fontSize: 11, color: "var(--ai4u-orange)", marginLeft: 4 }}>
+                Más costoso · ideal para análisis complejos
+              </span>
+            )}
+          </div>
           <textarea
             ref={textareaRef}
             value={inputValue}
