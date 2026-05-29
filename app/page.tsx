@@ -498,36 +498,14 @@ function ChatUI() {
         )}
 
         <div className="chat-input-area">
-          <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" as const, marginBottom: 6 }}>
-            <span style={{ fontSize: 11, color: "var(--ai4u-cadet-gray)", flexShrink: 0 }}>Modelo:</span>
-            {MODEL_OPTIONS.map((opt) => (
-              <button
-                key={opt.id}
-                onClick={() => setSelectedModel(opt.id)}
-                disabled={isLoading}
-                title={opt.description}
-                style={{
-                  background: selectedModel === opt.id ? "var(--ai4u-black)" : "transparent",
-                  color: selectedModel === opt.id ? "var(--ai4u-white)" : "var(--ai4u-text-secondary)",
-                  border: selectedModel === opt.id ? "1px solid var(--ai4u-black)" : "1px solid var(--ai4u-border-color)",
-                  borderRadius: 6,
-                  padding: "3px 9px",
-                  fontSize: 11,
-                  cursor: isLoading ? "default" : "pointer",
-                  fontFamily: "inherit",
-                  opacity: isLoading ? 0.5 : 1,
-                  whiteSpace: "nowrap" as const,
-                  transition: "background 0.15s, color 0.15s",
-                }}
-              >
-                {opt.label}
-              </button>
-            ))}
-            {selectedModel === "claude-opus-4-8" && (
-              <span style={{ fontSize: 11, color: "var(--ai4u-orange)", marginLeft: 4 }}>
-                Más costoso · ideal para análisis complejos
-              </span>
-            )}
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+            <span style={{
+              width: 6, height: 6, borderRadius: "50%", background: "#22c55e", display: "inline-block",
+              boxShadow: "0 0 8px #22c55e"
+            }} />
+            <span style={{ fontSize: 11, color: "var(--ai4u-cadet-gray)", fontWeight: 500 }}>
+              Asistente SAP B1 · Inteligencia Integrada ⚡
+            </span>
           </div>
 
           {/* Adjuntos pendientes */}
