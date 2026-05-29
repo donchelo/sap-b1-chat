@@ -20,7 +20,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="es" className={redHatDisplay.variable}>
       <body style={{ margin: 0, padding: 0 }}>
         {children}
-        <ChangelogPill />
       </body>
     </html>
   )

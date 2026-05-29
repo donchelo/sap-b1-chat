@@ -14,11 +14,20 @@ import { ChangelogPill as DSChangelogPill } from "@ai4u/design-system/changelog"
  */
 const APP_ID = "sap-b1-chat";
 
-export function ChangelogPill() {
+export function ChangelogPill({ style }: { style?: React.CSSProperties }) {
   const client = process.env.NEXT_PUBLIC_CHANGELOG_CLIENT;
   if (!client) return null;
+
+  const defaultStyle: React.CSSProperties = {
+    position: "fixed",
+    bottom: 16,
+    right: 16,
+    zIndex: 1000,
+    ...style
+  };
+
   return (
-    <div style={{ position: "fixed", bottom: 16, right: 16, zIndex: 1000 }}>
+    <div style={defaultStyle}>
       <DSChangelogPill
         client={client}
         app={process.env.NEXT_PUBLIC_CHANGELOG_APP || APP_ID}

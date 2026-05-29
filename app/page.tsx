@@ -16,6 +16,7 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { MarkdownContent } from "./components/MarkdownContent"
 import { useThreads, type Thread } from "./hooks/useThreads"
 import { useSuggestions } from "./hooks/useSuggestions"
+import { ChangelogPill } from "@/components/ChangelogPill"
 
 
 const BACKEND_URL =
@@ -361,6 +362,9 @@ function ChatUI() {
               onRename={(title) => renameThread(thread.id, title)}
             />
           ))}
+        </div>
+        <div style={ss.sidebarFooter}>
+          <ChangelogPill style={{ position: "relative", bottom: "auto", right: "auto", zIndex: "auto" }} />
         </div>
       </aside>
 
@@ -1004,6 +1008,7 @@ const ss: Record<string, React.CSSProperties> = {
   newBtn: { background: "var(--ai4u-black)", color: "var(--ai4u-white)", border: "none", borderRadius: 6, width: 28, height: 28, fontSize: 18, lineHeight: "1", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "inherit" },
   searchInput: { width: "100%", padding: "6px 10px", border: "1px solid var(--ai4u-border-color)", borderRadius: 8, fontSize: 12, background: "var(--ai4u-bg-default)", color: "var(--ai4u-text-primary)", fontFamily: "inherit", outline: "none", boxSizing: "border-box" as const },
   threadList: { flex: 1, overflowY: "auto", padding: "6px 8px" },
+  sidebarFooter: { padding: "10px 14px", borderTop: "1px solid var(--ai4u-border-color)", display: "flex", justifyContent: "center", alignItems: "center", background: "var(--ai4u-bg-surface)", flexShrink: 0 },
   threadItem: { display: "flex", alignItems: "center", borderRadius: 8, marginBottom: 2, transition: "background 0.1s" },
   threadBtn: { flex: 1, background: "transparent", border: "none", cursor: "pointer", padding: "8px 8px", textAlign: "left" as const, fontFamily: "inherit", display: "flex", flexDirection: "column" as const, gap: 2, minWidth: 0 },
   threadTitle: { fontSize: 13, color: "var(--ai4u-text-primary)", whiteSpace: "nowrap" as const, overflow: "hidden", textOverflow: "ellipsis", display: "block", maxWidth: 180 },
