@@ -17,7 +17,7 @@ El historial vive en el **changelog-service central**, no en este repo.
 
 ```
 MCP tool: add_changelog_entry({
-  clientId: "tamaprint",
+  clientId: "ai4u",
   appId: "sap-b1-chat",
   appName: "SAP B1 Chat",   // solo la primera vez
   bump: "patch",            // "patch" | "minor" | "major"
