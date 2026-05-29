@@ -1,43 +1,20 @@
 import { NextRequest, NextResponse } from "next/server"
-import { createHmac, timingSafeEqual } from "crypto"
-import { createSession, COOKIE } from "@/app/lib/session"
+import { verifyMcToken, createSession } from "@ai4u/mc-sso"
+import { COOKIE } from "@/app/lib/session"
 
-const SERVICE = "sapb1chat"
-
-interface McTokenPayload {
-  tenantId: string; serviceId: string; displayName: string; exp: number
-}
-
-function verifyMcToken(token: string, secret: string): McTokenPayload | null {
-  if (!token || !secret) return null
-  const dot = token.lastIndexOf(".")
-  if (dot === -1) return null
-  const payload  = token.slice(0, dot)
-  const sig      = token.slice(dot + 1)
-  const expected = createHmac("sha256", secret).update(payload).digest("base64url")
-  try {
-    const a = Buffer.from(sig,      "base64url")
-    const b = Buffer.from(expected, "base64url")
-    if (a.length !== b.length || !timingSafeEqual(a, b)) return null
-  } catch { return null }
-  try {
-    const data = JSON.parse(Buffer.from(payload, "base64url").toString()) as McTokenPayload
-    if (data.exp < Date.now()) return null
-    if (data.serviceId !== SERVICE) return null
-    return data
-  } catch { return null }
-}
+const SERVICE_ID     = "sapb1chat"
+const SESSION_TTL_MS = 8 * 60 * 60 * 1000
 
 export async function GET(req: NextRequest) {
   const token  = req.nextUrl.searchParams.get("token") ?? ""
   const secret = process.env.MISSION_CONTROL_SECRET ?? ""
 
-  const data = verifyMcToken(token, secret)
+  const data = verifyMcToken(token, SERVICE_ID, secret)
   if (!data) {
     return NextResponse.json({ error: "Token inválido o expirado" }, { status: 401 })
   }
 
-  const sessionToken = createSession(data.tenantId, secret)
+  const sessionToken = createSession(data.tenantId, secret, SESSION_TTL_MS)
   const res = NextResponse.redirect(new URL("/", req.url))
   res.cookies.set(COOKIE, sessionToken, {
     httpOnly: true,
