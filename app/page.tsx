@@ -7,7 +7,10 @@ import {
   isTextUIPart,
   isToolUIPart,
   isReasoningUIPart,
+  isFileUIPart,
   getToolName,
+  convertFileListToFileUIParts,
+  type FileUIPart,
 } from "ai"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { MarkdownContent } from "./components/MarkdownContent"
@@ -140,7 +143,9 @@ function ChatUI() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [selectedModel, setSelectedModel] = useState<ModelId>(DEFAULT_MODEL)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
+  const [pendingFiles, setPendingFiles] = useState<FileUIPart[]>([])
 
   const { suggestions, status: sugStatus, refresh: refreshSuggestions } =
     useSuggestions(tenantName)
@@ -232,10 +237,12 @@ function ChatUI() {
 
   function handleSend() {
     const text = inputValue.trim()
-    if (!text || isLoading) return
+    if (!text && pendingFiles.length === 0) return
+    if (isLoading) return
     clearError()
     setInputValue("")
-    sendMessage({ text })
+    setPendingFiles([])
+    sendMessage({ text: text || " ", files: pendingFiles.length > 0 ? pendingFiles : undefined })
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -243,6 +250,30 @@ function ChatUI() {
       e.preventDefault()
       handleSend()
     }
+  }
+
+  async function handlePaste(e: React.ClipboardEvent<HTMLTextAreaElement>) {
+    const imageFiles: File[] = []
+    for (const item of Array.from(e.clipboardData.items)) {
+      if (item.type.startsWith("image/")) {
+        const file = item.getAsFile()
+        if (file) imageFiles.push(file)
+      }
+    }
+    if (imageFiles.length === 0) return
+    e.preventDefault()
+    const dt = new DataTransfer()
+    imageFiles.forEach(f => dt.items.add(f))
+    const parts = await convertFileListToFileUIParts(dt.files)
+    setPendingFiles(prev => [...prev, ...parts])
+  }
+
+  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = e.target.files
+    if (!files || files.length === 0) return
+    const parts = await convertFileListToFileUIParts(files)
+    setPendingFiles(prev => [...prev, ...parts])
+    e.target.value = ""
   }
 
   function switchThread(threadId: string) {
@@ -469,32 +500,110 @@ function ChatUI() {
               </span>
             )}
           </div>
-          <textarea
-            ref={textareaRef}
-            value={inputValue}
-            onChange={(e) => setInputValue(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Escribe tu pregunta… (Ctrl+Enter para enviar)"
-            rows={1}
-            style={ss.textarea}
-            disabled={isLoading}
-          />
-          {isLoading ? (
-            <button type="button" onClick={stop} style={{ ...ss.stopBtn, alignSelf: "flex-end", minWidth: 90 }}>
-              ■ Detener
-            </button>
-          ) : (
+
+          {/* Adjuntos pendientes */}
+          {pendingFiles.length > 0 && (
+            <div style={ss.attachmentRow}>
+              {pendingFiles.map((f, i) => (
+                <AttachmentPreview
+                  key={i}
+                  file={f}
+                  onRemove={() => setPendingFiles(prev => prev.filter((_, j) => j !== i))}
+                />
+              ))}
+            </div>
+          )}
+
+          <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
             <button
               type="button"
-              onClick={handleSend}
-              disabled={!inputValue.trim()}
-              style={{ ...ss.primaryBtn, alignSelf: "flex-end", minWidth: 90 }}
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isLoading}
+              title="Adjuntar imagen o PDF (también puedes pegar con Ctrl+V)"
+              style={ss.clipBtn}
             >
-              Enviar
+              📎
             </button>
-          )}
+            <textarea
+              ref={textareaRef}
+              value={inputValue}
+              onChange={(e) => setInputValue(e.target.value)}
+              onKeyDown={handleKeyDown}
+              onPaste={handlePaste}
+              placeholder="Escribe tu pregunta… (Ctrl+Enter para enviar)"
+              rows={1}
+              style={ss.textarea}
+              disabled={isLoading}
+            />
+            {isLoading ? (
+              <button type="button" onClick={stop} style={{ ...ss.stopBtn, alignSelf: "flex-end", minWidth: 90 }}>
+                ■ Detener
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={handleSend}
+                disabled={!inputValue.trim() && pendingFiles.length === 0}
+                style={{ ...ss.primaryBtn, alignSelf: "flex-end", minWidth: 90 }}
+              >
+                Enviar
+              </button>
+            )}
+          </div>
+
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/jpeg,image/png,image/gif,image/webp,application/pdf"
+            multiple
+            style={{ display: "none" }}
+            onChange={handleFileChange}
+          />
         </div>
       </main>
+    </div>
+  )
+}
+
+// ─── AttachmentPreview ───────────────────────────────────────────────────────
+function AttachmentPreview({ file, onRemove }: { file: FileUIPart; onRemove: () => void }) {
+  const isImage = file.mediaType.startsWith("image/")
+  const name = file.filename ?? (isImage ? "imagen" : "archivo")
+  return (
+    <div style={ss.attachmentPreview}>
+      {isImage ? (
+        <img src={file.url} alt={name} style={ss.attachmentThumb} />
+      ) : (
+        <div style={ss.attachmentIcon}>📄</div>
+      )}
+      <span style={ss.attachmentName} title={name}>{name}</span>
+      <button onClick={onRemove} style={ss.attachmentRemove} title="Quitar">×</button>
+    </div>
+  )
+}
+
+// ─── FilesDisplay — adjuntos en burbuja de mensaje ───────────────────────────
+function FilesDisplay({ parts }: { parts: ReturnType<typeof useChat>["messages"][number]["parts"] }) {
+  const fileParts = parts.filter(isFileUIPart)
+  if (fileParts.length === 0) return null
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap" as const, gap: 6, marginBottom: 8 }}>
+      {fileParts.map((f, i) => {
+        const isImage = f.mediaType.startsWith("image/")
+        return isImage ? (
+          <img
+            key={i}
+            src={f.url}
+            alt={f.filename ?? "imagen"}
+            style={{ maxWidth: 220, maxHeight: 160, borderRadius: 8, objectFit: "cover" as const, border: "1px solid var(--ai4u-border-color)" }}
+          />
+        ) : (
+          <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 10px", background: "var(--ai4u-bg-surface)", border: "1px solid var(--ai4u-border-color)", borderRadius: 8, fontSize: 12, color: "var(--ai4u-text-secondary)" }}>
+            <span>📄</span>
+            <span>{f.filename ?? "documento"}</span>
+          </div>
+        )
+      })}
     </div>
   )
 }
@@ -743,6 +852,9 @@ function MessageBubble({
         </div>
       )}
 
+      {/* File attachments */}
+      <FilesDisplay parts={parts} />
+
       {/* Main text */}
       <div style={ss.bubbleContent}>
         {role === "assistant" ? (
@@ -863,6 +975,15 @@ const ss: Record<string, React.CSSProperties> = {
   toolStepHeader: { display: "flex", alignItems: "center", gap: 6, background: "transparent", border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 12, color: "var(--ai4u-text-secondary)", padding: "3px 0", width: "100%", textAlign: "left" as const },
   toolOutput: { fontSize: 11, fontFamily: "monospace", background: "rgba(0,0,0,0.04)", borderRadius: 6, padding: "8px 10px", overflowX: "auto" as const, maxHeight: 200, overflowY: "auto" as const, marginTop: 4, color: "var(--ai4u-text-secondary)" },
   toolError: { fontSize: 11, color: "var(--ai4u-orange)", marginTop: 4, paddingLeft: 4 },
+
+  // Attachment UI
+  clipBtn: { background: "transparent", border: "1px solid var(--ai4u-border-color)", borderRadius: 8, padding: "8px 10px", fontSize: 16, cursor: "pointer", flexShrink: 0, lineHeight: 1, color: "var(--ai4u-text-secondary)", alignSelf: "flex-end" as const },
+  attachmentRow: { display: "flex", flexWrap: "wrap" as const, gap: 8, marginBottom: 8 },
+  attachmentPreview: { display: "flex", alignItems: "center", gap: 6, padding: "4px 6px", background: "var(--ai4u-bg-surface)", border: "1px solid var(--ai4u-border-color)", borderRadius: 8, maxWidth: 200 },
+  attachmentThumb: { width: 36, height: 36, objectFit: "cover" as const, borderRadius: 4, flexShrink: 0 },
+  attachmentIcon: { width: 36, height: 36, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, flexShrink: 0 },
+  attachmentName: { fontSize: 11, color: "var(--ai4u-text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const, flex: 1, minWidth: 0 },
+  attachmentRemove: { background: "transparent", border: "none", cursor: "pointer", color: "var(--ai4u-cadet-gray)", fontSize: 14, padding: "0 2px", lineHeight: 1, flexShrink: 0, fontFamily: "inherit" },
 
   // Reasoning / thinking
   reasoningBlock: { marginBottom: 8, borderRadius: 8, border: "1px solid var(--ai4u-border-color)", overflow: "hidden" },
