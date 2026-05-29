@@ -816,6 +816,26 @@ function MessageBubble({
     return map
   }, [parts])
 
+  // Datos de uso y costos específicos para este bubble
+  const bubbleUsage = useMemo(() => {
+    if (role !== "assistant") return null
+    type UsagePart = {
+      type: "data-usage"
+      data: {
+        inputTokens: number
+        outputTokens: number
+        cacheReadTokens: number
+        cacheWriteTokens: number
+        modelId?: string
+        modelName?: string
+        costUsd?: number
+        savingsUsd?: number
+      }
+    }
+    const usageParts = parts.filter((p) => p.type === "data-usage") as UsagePart[]
+    return usageParts.at(-1)?.data ?? null
+  }, [parts, role])
+
   // Último data-status dentro de este bubble (para reemplazar typing dots)
   const bubbleStatusText = useMemo(() => {
     const sp = parts.filter(p => p.type === "data-status") as Array<{ type: string; data: { text: string } }>
@@ -879,7 +899,7 @@ function MessageBubble({
 
       {/* Actions */}
       {text && (
-        <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6, flexWrap: "wrap" as const }}>
           <button onClick={copy} style={ss.microBtn}>
             {copied ? "✓ Copiado" : "Copiar"}
           </button>
@@ -890,6 +910,35 @@ function MessageBubble({
             <button onClick={onEdit} style={ss.microBtn} title="Editar y regenerar desde este punto">
               ✎ Editar
             </button>
+          )}
+
+          {/* Indicador de Transparencia de Modelo y Costos */}
+          {role === "assistant" && bubbleUsage && (
+            <span style={{
+              fontSize: 10,
+              color: "var(--ai4u-cadet-gray)",
+              display: "flex",
+              alignItems: "center",
+              gap: 4,
+              marginLeft: "auto",
+              padding: "2px 8px",
+              background: "var(--ai4u-bg-surface)",
+              border: "1px solid var(--ai4u-border-color)",
+              borderRadius: 12,
+              fontFamily: TYPOGRAPHY_TOKENS.fontFamily.code
+            }} title={`Entrada: ${bubbleUsage.inputTokens.toLocaleString()} | Salida: ${bubbleUsage.outputTokens.toLocaleString()}${bubbleUsage.cacheReadTokens > 0 ? ` | Cache Hit: ${bubbleUsage.cacheReadTokens.toLocaleString()}` : ""}`}>
+              <span>🤖 {bubbleUsage.modelName ?? "Claude"}</span>
+              <span>·</span>
+              <span style={{ fontWeight: 600, color: "var(--ai4u-text-primary)" }}>${bubbleUsage.costUsd?.toFixed(4) ?? "0.0000"}</span>
+              {bubbleUsage.savingsUsd !== undefined && bubbleUsage.savingsUsd > 0 && (
+                <>
+                  <span>·</span>
+                  <span style={{ color: "#22c55e", fontWeight: 600 }} title="Dinero ahorrado gracias al prompt caching de Anthropic">
+                    ⚡ Ahorro: ${bubbleUsage.savingsUsd.toFixed(4)}
+                  </span>
+                </>
+              )}
+            </span>
           )}
         </div>
       )}
