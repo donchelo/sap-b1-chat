@@ -9,6 +9,7 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
+    "@ai4u/design-system": "github:donchelo/sistemaDiseno",
     "@ai-sdk/react": "^3.0.193",
     "ai": "^6.0.191",
     "next": "^15.3.2",
