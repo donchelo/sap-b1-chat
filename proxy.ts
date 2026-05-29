@@ -10,8 +10,14 @@ export function proxy(req: NextRequest) {
 
   if (PUBLIC_PATHS.some(p => pathname.startsWith(p))) return NextResponse.next()
 
-  // If MISSION_CONTROL_SECRET is not set: dev mode, allow all
-  if (!process.env.MISSION_CONTROL_SECRET) return NextResponse.next()
+  // Dev-mode escape ONLY outside production. In production, a missing secret
+  // is a misconfiguration — fail closed (block) instead of silently allowing.
+  if (!process.env.MISSION_CONTROL_SECRET) {
+    if (process.env.NODE_ENV === "production") {
+      return NextResponse.json({ error: "Servidor no configurado" }, { status: 500 })
+    }
+    return NextResponse.next()
+  }
 
   // Valid session = non-empty cookie (verified in depth by session.ts in API routes)
   const session = req.cookies.get(COOKIE)?.value ?? ""

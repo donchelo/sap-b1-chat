@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createHmac, timingSafeEqual } from "crypto"
+import { createSession, COOKIE } from "@/app/lib/session"
 
-const COOKIE  = "sap_chat_session"
 const SERVICE = "sapb1chat"
 
 interface McTokenPayload {
@@ -28,12 +28,6 @@ function verifyMcToken(token: string, secret: string): McTokenPayload | null {
   } catch { return null }
 }
 
-function signSession(tenantId: string, secret: string): string {
-  const payload = Buffer.from(JSON.stringify({ tenantId, iat: Date.now() })).toString("base64url")
-  const sig     = createHmac("sha256", secret).update(payload).digest("base64url")
-  return `${payload}.${sig}`
-}
-
 export async function GET(req: NextRequest) {
   const token  = req.nextUrl.searchParams.get("token") ?? ""
   const secret = process.env.MISSION_CONTROL_SECRET ?? ""
@@ -43,7 +37,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Token inválido o expirado" }, { status: 401 })
   }
 
-  const sessionToken = signSession(data.tenantId, secret)
+  const sessionToken = createSession(data.tenantId, secret)
   const res = NextResponse.redirect(new URL("/", req.url))
   res.cookies.set(COOKIE, sessionToken, {
     httpOnly: true,
