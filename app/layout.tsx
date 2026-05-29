@@ -2,6 +2,7 @@ import type { Metadata } from "next"
 import { Red_Hat_Display } from "next/font/google"
 import "@ai4u/design-system/styles"
 import "./globals.css"
+import { ChangelogPill } from "@/components/ChangelogPill"
 
 const redHatDisplay = Red_Hat_Display({
   subsets: ["latin"],
@@ -17,7 +18,10 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="es" className={redHatDisplay.variable}>
-      <body style={{ margin: 0, padding: 0 }}>{children}</body>
+      <body style={{ margin: 0, padding: 0 }}>
+        {children}
+        <ChangelogPill />
+      </body>
     </html>
   )
 }
