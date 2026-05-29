@@ -1,6 +1,7 @@
 "use client"
 
 import { useChat } from "@ai-sdk/react"
+import { TYPOGRAPHY_TOKENS } from "@ai4u/design-system/tokens"
 import {
   DefaultChatTransport,
   isTextUIPart,
@@ -342,7 +343,7 @@ function ChatUI({ apiKey }: { apiKey: string }) {
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
             {/* Token indicator */}
             {messages.length > 0 && (
-              <span style={{ fontSize: 11, color: tokenColor, fontFamily: "'Necto Mono', monospace" }}
+              <span style={{ fontSize: 11, color: tokenColor, fontFamily: TYPOGRAPHY_TOKENS.fontFamily.code }}
                 title={`~${tokenEstimate.toLocaleString()} tokens estimados de 200k`}>
                 ~{tokenEstimate > 1000 ? `${Math.round(tokenEstimate / 1000)}k` : tokenEstimate}t
               </span>
@@ -577,14 +578,14 @@ function ToolCallStep({
 
         {/* Cronómetro cuando no hay status text */}
         {isPending && !toolStatusText && elapsed > 0 && (
-          <span style={{ fontSize: 10, color: "var(--ai4u-cadet-gray)", fontFamily: "'Necto Mono', monospace" }}>
+          <span style={{ fontSize: 10, color: "var(--ai4u-cadet-gray)", fontFamily: TYPOGRAPHY_TOKENS.fontFamily.code }}>
             {elapsed}s
           </span>
         )}
 
         {/* Duración real SAP al completar */}
         {isDone && sapDuration !== undefined && (
-          <span style={{ fontSize: 10, color: "var(--ai4u-cadet-gray)", fontFamily: "'Necto Mono', monospace" }}>
+          <span style={{ fontSize: 10, color: "var(--ai4u-cadet-gray)", fontFamily: TYPOGRAPHY_TOKENS.fontFamily.code }}>
             · {(sapDuration / 1000).toFixed(1)}s SAP
           </span>
         )}
@@ -823,7 +824,7 @@ const ss: Record<string, React.CSSProperties> = {
   // Chat
   empty: { maxWidth: 560, margin: "40px auto", textAlign: "center" },
   suggestionBtn: { background: "var(--ai4u-bg-surface)", border: "1px solid var(--ai4u-border-color)", borderRadius: 20, padding: "6px 14px", fontSize: 13, cursor: "pointer", color: "var(--ai4u-text-primary)", fontFamily: "inherit" },
-  bubbleLabel: { fontSize: 11, fontWeight: 600, opacity: 0.6, marginBottom: 4, textTransform: "uppercase" as const, letterSpacing: "0.08em", fontFamily: "'Necto Mono', monospace" },
+  bubbleLabel: { fontSize: 11, fontWeight: 600, opacity: 0.6, marginBottom: 4, textTransform: "uppercase" as const, letterSpacing: "0.08em", fontFamily: TYPOGRAPHY_TOKENS.fontFamily.code },
   bubbleContent: { fontSize: 14, lineHeight: 1.6, wordBreak: "break-word" as const },
   microBtn: { background: "transparent", border: "none", color: "var(--ai4u-cadet-gray)", fontSize: 11, cursor: "pointer", padding: "2px 0", fontFamily: "inherit" },
   errorBox: { display: "flex", justifyContent: "space-between", alignItems: "center", background: "rgba(255,110,0,0.05)", border: "1px solid rgba(255,110,0,0.30)", borderRadius: 8, padding: "10px 14px", color: "var(--ai4u-orange)", fontSize: 13, gap: 8 },
@@ -833,7 +834,7 @@ const ss: Record<string, React.CSSProperties> = {
   ghostBtn: { background: "transparent", color: "var(--ai4u-text-secondary)", border: "1px solid var(--ai4u-border-color)", borderRadius: 8, padding: "6px 12px", fontSize: 13, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" as const },
   stopBtn: { background: "rgba(255,110,0,0.08)", color: "var(--ai4u-orange)", border: "1px solid rgba(255,110,0,0.30)", borderRadius: 8, padding: "10px 18px", fontSize: 14, cursor: "pointer", fontWeight: 500, fontFamily: "inherit", whiteSpace: "nowrap" as const },
   statusStrip: { display: "flex", alignItems: "center", gap: 7, padding: "5px 20px", fontSize: 11, color: "var(--ai4u-cadet-gray)", background: "var(--ai4u-bg-surface)", borderTop: "1px solid var(--ai4u-border-color)", flexShrink: 0 },
-  versionBadge: { background: "transparent", color: "var(--ai4u-cadet-gray)", border: "1px solid var(--ai4u-border-color)", borderRadius: 6, padding: "3px 8px", fontSize: 11, cursor: "pointer", fontFamily: "'Necto Mono', monospace", whiteSpace: "nowrap" as const, flexShrink: 0 },
+  versionBadge: { background: "transparent", color: "var(--ai4u-cadet-gray)", border: "1px solid var(--ai4u-border-color)", borderRadius: 6, padding: "3px 8px", fontSize: 11, cursor: "pointer", fontFamily: TYPOGRAPHY_TOKENS.fontFamily.code, whiteSpace: "nowrap" as const, flexShrink: 0 },
 
   // Tool steps
   toolStepList: { display: "flex", flexDirection: "column" as const, gap: 4, marginBottom: 10, borderLeft: "2px solid var(--ai4u-border-color)", paddingLeft: 10 },

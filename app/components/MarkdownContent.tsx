@@ -1,4 +1,5 @@
 import type { ReactNode } from "react"
+import { TYPOGRAPHY_TOKENS } from "@ai4u/design-system/tokens"
 
 function renderInline(text: string): ReactNode[] {
   const parts: ReactNode[] = []
@@ -18,7 +19,7 @@ function renderInline(text: string): ReactNode[] {
             borderRadius: 3,
             padding: "1px 5px",
             fontSize: 12,
-            fontFamily: "'Necto Mono', monospace",
+            fontFamily: TYPOGRAPHY_TOKENS.fontFamily.code,
           }}
         >
           {tok.slice(1, -1)}
@@ -59,7 +60,7 @@ export function MarkdownContent({ text }: { text: string }) {
             margin: "8px 0",
             overflowX: "auto",
             fontSize: 12,
-            fontFamily: "'Necto Mono', monospace",
+            fontFamily: TYPOGRAPHY_TOKENS.fontFamily.code,
           }}
         >
           <code>{codeLines.join("\n")}</code>

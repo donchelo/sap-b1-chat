@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
+import { TYPOGRAPHY_TOKENS } from "@ai4u/design-system/tokens"
 
 interface ChangelogEntry {
   version: string
@@ -161,13 +162,13 @@ const s: Record<string, React.CSSProperties> = {
   },
   entryVersion: {
     fontSize: 13, fontWeight: 700, color: "var(--ai4u-text-primary)",
-    fontFamily: "'Necto Mono', monospace",
+    fontFamily: TYPOGRAPHY_TOKENS.fontFamily.code,
   },
   entryDate: { fontSize: 11, color: "var(--ai4u-cadet-gray)" },
   changeList: { listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 5 },
   changeItem: { display: "flex", alignItems: "baseline", gap: 8, fontSize: 13 },
   typeBadge: {
-    fontFamily: "'Necto Mono', monospace", fontSize: 10, fontWeight: 700,
+    fontFamily: TYPOGRAPHY_TOKENS.fontFamily.code, fontSize: 10, fontWeight: 700,
     flexShrink: 0, minWidth: 48,
   },
   changeText: { color: "var(--ai4u-text-secondary)", lineHeight: 1.5 },
