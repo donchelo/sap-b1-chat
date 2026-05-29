@@ -174,6 +174,15 @@ function ChatUI() {
 
   const tokenEstimate = useMemo(() => estimateTokens(messages), [messages])
 
+  // Datos reales de uso emitidos por el backend al finalizar cada respuesta
+  const latestUsage = useMemo(() => {
+    const lastMsg = [...messages].reverse().find(m => m.role === "assistant")
+    if (!lastMsg) return null
+    type UsagePart = { type: "data-usage"; data: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number } }
+    const parts = lastMsg.parts.filter(p => p.type === "data-usage") as UsagePart[]
+    return parts.at(-1)?.data ?? null
+  }, [messages])
+
   // Último texto de data-status del backend para el status strip
   const liveStatusText = useMemo(() => {
     const lastMsg = [...messages].reverse().find(m => m.role === "assistant")
@@ -182,9 +191,10 @@ function ChatUI() {
     return sp.at(-1)?.data?.text
   }, [messages])
 
+  const contextTokens = latestUsage?.inputTokens ?? tokenEstimate
   const tokenColor =
-    tokenEstimate > CTX_LIMIT ? "var(--ai4u-orange)" :
-    tokenEstimate > CTX_WARN  ? "#d97706" :
+    contextTokens > CTX_LIMIT ? "var(--ai4u-orange)" :
+    contextTokens > CTX_WARN  ? "#d97706" :
     "var(--ai4u-cadet-gray)"
 
   const filteredThreads = search.trim()
@@ -372,10 +382,29 @@ function ChatUI() {
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
             {/* Token indicator */}
             {messages.length > 0 && (
-              <span style={{ fontSize: 11, color: tokenColor, fontFamily: TYPOGRAPHY_TOKENS.fontFamily.code }}
-                title={`~${tokenEstimate.toLocaleString()} tokens estimados de ${MODEL_OPTIONS.find(m => m.id === selectedModel)?.ctxK ?? 1000}k`}>
-                ~{tokenEstimate > 1000 ? `${Math.round(tokenEstimate / 1000)}k` : tokenEstimate}t
-              </span>
+              latestUsage ? (
+                <span
+                  style={{ fontSize: 11, fontFamily: TYPOGRAPHY_TOKENS.fontFamily.code, display: "flex", alignItems: "center", gap: 5 }}
+                  title={`Entrada: ${latestUsage.inputTokens.toLocaleString()} tokens | Salida: ${latestUsage.outputTokens.toLocaleString()} tokens${latestUsage.cacheReadTokens > 0 ? ` | Cache hit: ${latestUsage.cacheReadTokens.toLocaleString()} tokens` : ""}`}
+                >
+                  <span style={{ color: tokenColor }}>
+                    ↑{latestUsage.inputTokens > 1000 ? `${(latestUsage.inputTokens / 1000).toFixed(1)}k` : latestUsage.inputTokens}
+                  </span>
+                  <span style={{ color: "var(--ai4u-cadet-gray)" }}>
+                    ↓{latestUsage.outputTokens > 1000 ? `${(latestUsage.outputTokens / 1000).toFixed(1)}k` : latestUsage.outputTokens}
+                  </span>
+                  {latestUsage.cacheReadTokens > 0 && (
+                    <span style={{ color: "#22c55e" }} title="Cache hit — tokens procesados al 10% del precio">
+                      ⚡{latestUsage.cacheReadTokens > 1000 ? `${(latestUsage.cacheReadTokens / 1000).toFixed(1)}k` : latestUsage.cacheReadTokens}
+                    </span>
+                  )}
+                </span>
+              ) : (
+                <span style={{ fontSize: 11, color: tokenColor, fontFamily: TYPOGRAPHY_TOKENS.fontFamily.code }}
+                  title={`~${tokenEstimate.toLocaleString()} tokens estimados`}>
+                  ~{tokenEstimate > 1000 ? `${Math.round(tokenEstimate / 1000)}k` : tokenEstimate}t
+                </span>
+              )
             )}
             {activeThread && messages.length > 0 && (
               <button
