@@ -11,11 +11,9 @@ import {
 } from "ai"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { MarkdownContent } from "./components/MarkdownContent"
-import { ChangelogModal } from "./components/ChangelogModal"
 import { useThreads, type Thread } from "./hooks/useThreads"
 import { useSuggestions } from "./hooks/useSuggestions"
 
-const APP_VERSION = "0.1.0"
 
 const BACKEND_URL =
   process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:4100"
@@ -131,14 +129,7 @@ function ChatUI() {
   const [inputValue, setInputValue] = useState("")
   const [search, setSearch] = useState("")
   const [sidebarOpen, setSidebarOpen] = useState(false)
-  const [showChangelog, setShowChangelog] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
-
-  // Auto-show changelog when the app version is newer than the last seen version
-  useEffect(() => {
-    const lastSeen = localStorage.getItem("changelog:lastSeen")
-    if (lastSeen !== APP_VERSION) setShowChangelog(true)
-  }, [])
   const bottomRef = useRef<HTMLDivElement>(null)
 
   const { suggestions, status: sugStatus, refresh: refreshSuggestions } =
@@ -268,16 +259,6 @@ function ChatUI() {
   return (
     <div className="chat-root">
 
-      {showChangelog && (
-        <ChangelogModal
-          version={APP_VERSION}
-          onClose={() => {
-            localStorage.setItem("changelog:lastSeen", APP_VERSION)
-            setShowChangelog(false)
-          }}
-        />
-      )}
-
       {/* ── Backdrop móvil ──────────────────────────────────────── */}
       <div
         className={`sidebar-backdrop${sidebarOpen ? " is-open" : ""}`}
@@ -356,13 +337,6 @@ function ChatUI() {
                 ↓ Exportar
               </button>
             )}
-            <button
-              onClick={() => setShowChangelog(true)}
-              style={ss.versionBadge}
-              title="Ver historial de cambios"
-            >
-              v{APP_VERSION}
-            </button>
           </div>
         </header>
 
@@ -833,7 +807,6 @@ const ss: Record<string, React.CSSProperties> = {
   ghostBtn: { background: "transparent", color: "var(--ai4u-text-secondary)", border: "1px solid var(--ai4u-border-color)", borderRadius: 8, padding: "6px 12px", fontSize: 13, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" as const },
   stopBtn: { background: "rgba(255,110,0,0.08)", color: "var(--ai4u-orange)", border: "1px solid rgba(255,110,0,0.30)", borderRadius: 8, padding: "10px 18px", fontSize: 14, cursor: "pointer", fontWeight: 500, fontFamily: "inherit", whiteSpace: "nowrap" as const },
   statusStrip: { display: "flex", alignItems: "center", gap: 7, padding: "5px 20px", fontSize: 11, color: "var(--ai4u-cadet-gray)", background: "var(--ai4u-bg-surface)", borderTop: "1px solid var(--ai4u-border-color)", flexShrink: 0 },
-  versionBadge: { background: "transparent", color: "var(--ai4u-cadet-gray)", border: "1px solid var(--ai4u-border-color)", borderRadius: 6, padding: "3px 8px", fontSize: 11, cursor: "pointer", fontFamily: TYPOGRAPHY_TOKENS.fontFamily.code, whiteSpace: "nowrap" as const, flexShrink: 0 },
 
   // Tool steps
   toolStepList: { display: "flex", flexDirection: "column" as const, gap: 4, marginBottom: 10, borderLeft: "2px solid var(--ai4u-border-color)", paddingLeft: 10 },
