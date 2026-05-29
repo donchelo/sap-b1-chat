@@ -1,5 +1,6 @@
 import type { Metadata } from "next"
 import { Red_Hat_Display } from "next/font/google"
+import "@ai4u/design-system/styles"
 import "./globals.css"
 
 const redHatDisplay = Red_Hat_Display({
