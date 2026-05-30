@@ -31,13 +31,13 @@ const TOOL_LABELS: Record<string, string> = {
   ejecutar_accion:     "Ejecutando acción",
 }
 
-type ModelId = "claude-haiku-4-5" | "claude-sonnet-4-6" | "claude-opus-4-8"
-const DEFAULT_MODEL: ModelId = "claude-sonnet-4-6"
+type ModelId = "claude-haiku-4.5" | "claude-sonnet-4.6" | "claude-opus-4.8"
+const DEFAULT_MODEL: ModelId = "claude-sonnet-4.6"
 
 const MODEL_OPTIONS: Array<{ id: ModelId; label: string; description: string; ctxK: number }> = [
-  { id: "claude-haiku-4-5",  label: "Rápido",         description: "Claude Haiku 4.5 — consultas simples y rápidas, menor costo",                ctxK: 200  },
-  { id: "claude-sonnet-4-6", label: "Balanceado",      description: "Claude Sonnet 4.6 — ideal para la mayoría de consultas SAP (predeterminado)", ctxK: 1000 },
-  { id: "claude-opus-4-8",   label: "Máxima IA ⚡",    description: "Claude Opus 4.8 — análisis complejos y razonamiento profundo. Más costoso.",   ctxK: 1000 },
+  { id: "claude-haiku-4.5",  label: "Rápido",         description: "Claude Haiku 4.5 — consultas simples y rápidas, menor costo",                ctxK: 200  },
+  { id: "claude-sonnet-4.6", label: "Balanceado",      description: "Claude Sonnet 4.6 — ideal para la mayoría de consultas SAP (predeterminado)", ctxK: 1000 },
+  { id: "claude-opus-4.8",   label: "Máxima IA ⚡",    description: "Claude Opus 4.8 — análisis complejos y razonamiento profundo. Más costoso.",   ctxK: 1000 },
 ]
 
 // Context limit: Claude Sonnet 200k tokens. Alert zones:
@@ -184,12 +184,24 @@ function ChatUI() {
     return parts.at(-1)?.data ?? null
   }, [messages])
 
-  // Último texto de data-status del backend para el status strip
+  // Texto de progreso para la status strip — prioriza tool-status (granular) sobre data-status
   const liveStatusText = useMemo(() => {
     const lastMsg = [...messages].reverse().find(m => m.role === "assistant")
     if (!lastMsg) return undefined
+    // data-tool-status: qué tool está corriendo ahora ("Ejecutando consulta SQL…", "N registros")
+    const ts = lastMsg.parts.filter(p => p.type === "data-tool-status") as Array<{ type: string; data: { text: string } }>
+    const latestToolStatus = ts.at(-1)?.data?.text
+    if (latestToolStatus) return latestToolStatus
+    // data-status: fases de conexión ("Conectando a SAP B1…")
     const sp = lastMsg.parts.filter(p => p.type === "data-status") as Array<{ type: string; data: { text: string } }>
     return sp.at(-1)?.data?.text
+  }, [messages])
+
+  // Contador de tool calls activos en el mensaje en streaming
+  const liveToolCount = useMemo(() => {
+    const lastMsg = [...messages].reverse().find(m => m.role === "assistant")
+    if (!lastMsg) return 0
+    return lastMsg.parts.filter(p => p.type === "data-tool-status").length
   }, [messages])
 
   const contextTokens = latestUsage?.inputTokens ?? tokenEstimate
@@ -486,17 +498,21 @@ function ChatUI() {
               background: status === "submitted" ? "var(--ai4u-orange)" : "var(--ai4u-blue)",
               animation: "pulse 1s ease-in-out infinite",
             }} />
-            <span>
+            <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
               {status === "submitted"
                 ? submittedElapsed < 3  ? "Conectando al backend…"
                 : submittedElapsed < 12 ? "Esperando respuesta de SAP B1…"
                 : submittedElapsed < 35 ? `SAP B1 procesando… (${submittedElapsed}s)`
                 : submittedElapsed < 70 ? `Consulta larga en SAP — puede tardar (${submittedElapsed}s)`
                 :                         `Tiempo de espera alto (${submittedElapsed}s) — puedes cancelar`
-                : liveStatusText ?? "Recibiendo respuesta…"}
+                : liveStatusText
+                  ? liveToolCount > 1
+                    ? `[${liveToolCount}] ${liveStatusText}`
+                    : liveStatusText
+                  : "Recibiendo respuesta…"}
             </span>
-            <span style={{ marginLeft: "auto", opacity: 0.6 }}>
-              Usa ■ Detener para cancelar
+            <span style={{ opacity: 0.5, flexShrink: 0, fontSize: 10 }}>
+              ■ Detener
             </span>
           </div>
         )}
