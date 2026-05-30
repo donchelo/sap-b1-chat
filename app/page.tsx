@@ -687,21 +687,21 @@ function ToolCallStep({
     errorText?: string
   }
 
-  const isDone    = inv.state === "output-available"
-  const isError   = inv.state === "output-error"
-  const isPending = !isDone && !isError
-  const elapsed   = useElapsed(isPending)
+  const outputError  = inv.output?.error
+  const isError      = inv.state === "output-error" || !!outputError
+  const isDone       = inv.state === "output-available" && !outputError
+  const isPending    = !isDone && !isError
+  const elapsed      = useElapsed(isPending)
 
   const sapDuration  = inv.output?.sapDuration
-  const outputError  = inv.output?.error
   const isRetryable  = outputError?.retryable === true
 
   return (
     <div style={ss.toolStep}>
       <button
         style={ss.toolStepHeader}
-        onClick={() => isDone && setExpanded((v) => !v)}
-        disabled={!isDone}
+        onClick={() => (isDone || isError) && setExpanded((v) => !v)}
+        disabled={!isDone && !isError}
       >
         <span style={{
           color: isError ? "var(--ai4u-orange)" : isDone ? "var(--ai4u-text-secondary)" : "var(--ai4u-cadet-gray)",
@@ -732,14 +732,14 @@ function ToolCallStep({
           </span>
         )}
 
-        {isDone && (
+        {(isDone || isError) && (
           <span style={{ fontSize: 10, color: "var(--ai4u-cadet-gray)" }}>
             {expanded ? "▲" : "▼"}
           </span>
         )}
       </button>
 
-      {expanded && isDone && inv.output !== undefined && (
+      {expanded && (isDone || isError) && inv.output !== undefined && (
         <pre style={ss.toolOutput}>
           {typeof inv.output === "string" ? inv.output : JSON.stringify(inv.output, null, 2)}
         </pre>
