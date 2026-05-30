@@ -14,7 +14,7 @@ import { ChangelogPill as DSChangelogPill } from "@ai4u/design-system/changelog"
  */
 const APP_ID = "sap-b1-chat";
 
-export function ChangelogPill({ style }: { style?: React.CSSProperties }) {
+export function ChangelogPill({ style, align }: { style?: React.CSSProperties; align?: "left" | "right" }) {
   const client = process.env.NEXT_PUBLIC_CHANGELOG_CLIENT;
   if (!client) return null;
 
@@ -32,6 +32,7 @@ export function ChangelogPill({ style }: { style?: React.CSSProperties }) {
         client={client}
         app={process.env.NEXT_PUBLIC_CHANGELOG_APP || APP_ID}
         serviceUrl={process.env.NEXT_PUBLIC_CHANGELOG_URL || undefined}
+        align={align}
       />
     </div>
   );

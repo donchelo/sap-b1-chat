@@ -364,7 +364,7 @@ function ChatUI() {
           ))}
         </div>
         <div style={ss.sidebarFooter}>
-          <ChangelogPill style={{ position: "relative", bottom: "auto", right: "auto", zIndex: "auto" }} />
+          <ChangelogPill style={{ position: "relative", bottom: "auto", right: "auto", zIndex: "auto" }} align="left" />
         </div>
       </aside>
 
