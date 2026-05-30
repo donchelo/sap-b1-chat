@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "@ai-sdk/react": "^3.0.193",
-    "@ai4u/design-system": "github:donchelo/sistemaDiseno#5d136d9",
+    "@ai4u/design-system": "github:donchelo/sistemaDiseno#5d136d9cfc0e494b58d60da63fd90248885b7d29",
     "@ai4u/mc-sso": "github:donchelo/mc-sso",
     "ai": "^6.0.191",
     "next": "^15.3.2",
