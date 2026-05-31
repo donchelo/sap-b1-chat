@@ -9,7 +9,7 @@ import type { ModelMessage, UIMessageStreamWriter } from "ai"
 import { getTenantId, getApiKey } from "@/app/lib/session"
 import { BackendClient } from "@/lib/backend-client"
 import { ENTITY_MAP } from "@/lib/entity-map"
-import { buildStaticSystemPrompt, buildDynamicSystemContext } from "@/lib/chat/system-prompt"
+import { buildStaticSystemPrompt, buildDynamicSystemContext, type CatalogEntry } from "@/lib/chat/system-prompt"
 import { fetchSapContext } from "@/lib/chat/sap-context"
 
 export const maxDuration = 300
@@ -146,13 +146,20 @@ export async function POST(req: Request) {
     execute: async (ctx) => {
       writer = ctx.writer
       writer.write({ type: "data-status", data: { text: "Conectando a SAP B1…" } } as never)
-      const sapCtx = await fetchSapContext(client, tenantId)
+      const [sapCtx, catalogResult] = await Promise.all([
+        fetchSapContext(client, tenantId),
+        client.catalogList().catch(() => null),
+      ])
       writer.write({ type: "data-status", data: { text: "Analizando tu consulta…" } } as never)
+
+      const catalogEntries: CatalogEntry[] | undefined = catalogResult?.queries?.map(
+        (q) => ({ name: q.name, description: q.description })
+      )
 
       const result = streamText({
         model: anthropic(toApiSlug(selectedModel)),
         system: [
-          { role: "system" as const, content: buildStaticSystemPrompt(tenantId) },
+          { role: "system" as const, content: buildStaticSystemPrompt(tenantId, catalogEntries) },
           { role: "system" as const, content: buildDynamicSystemContext(tenantId, sapCtx) },
         ],
         messages: allMessages,
@@ -849,7 +856,7 @@ export async function POST(req: Request) {
               writer.write({ type: "data-tool-status", data: { toolCallId, text: confirmar ? `Creando pedido para ${header.cardCode}…` : `Preparando pedido para ${header.cardCode}…` } } as never)
               if (!confirmar) return { preview: header, mensaje: "Vista previa. Confirma para crear en SAP." }
               try {
-                const data = await client.post<unknown>("/ventas/pedidos", header)
+                const data = await client.post<unknown>("/sales/orders", header)
                 return { result: data }
               } catch (err) { return classifySapError(err) }
             },
@@ -885,7 +892,7 @@ export async function POST(req: Request) {
               writer.write({ type: "data-tool-status", data: { toolCallId, text: confirmar ? `Creando cotización para ${header.cardCode}…` : `Preparando cotización para ${header.cardCode}…` } } as never)
               if (!confirmar) return { preview: header, mensaje: "Vista previa. Confirma para crear en SAP." }
               try {
-                const data = await client.post<unknown>("/ventas/cotizaciones", header)
+                const data = await client.post<unknown>("/quotations", header)
                 return { result: data }
               } catch (err) { return classifySapError(err) }
             },
@@ -922,7 +929,7 @@ export async function POST(req: Request) {
               writer.write({ type: "data-tool-status", data: { toolCallId, text: confirmar ? `Creando OC para ${header.cardCode}…` : `Preparando OC para ${header.cardCode}…` } } as never)
               if (!confirmar) return { preview: header, mensaje: "Vista previa. Confirma para crear en SAP." }
               try {
-                const data = await client.post<unknown>("/compras/ordenes", header)
+                const data = await client.post<unknown>("/purchasing/orders", header)
                 return { result: data }
               } catch (err) { return classifySapError(err) }
             },
@@ -959,7 +966,7 @@ export async function POST(req: Request) {
               writer.write({ type: "data-tool-status", data: { toolCallId, text: confirmar ? `Creando OP para ${payload.itemCode}…` : `Preparando OP para ${payload.itemCode}…` } } as never)
               if (!confirmar) return { preview: payload, mensaje: "Vista previa. Confirma para crear en SAP." }
               try {
-                const data = await client.post<unknown>("/produccion/ordenes", payload)
+                const data = await client.post<unknown>("/production/orders", payload)
                 return { result: data }
               } catch (err) { return classifySapError(err) }
             },

@@ -2,25 +2,29 @@ export type TenantId = string
 import { getTenantProfile } from "./tenant-profiles"
 import type { SapContext } from "./sap-context"
 
-const CATALOG_ENTRIES: Array<{ pregunta: string; query: string }> = [
-  { pregunta: "Ventas/facturas del mes o período", query: "ventas_por_periodo" },
-  { pregunta: "Top clientes por facturación", query: "top_clientes_por_facturacion" },
-  { pregunta: "Ventas por vendedor", query: "ventas_por_vendedor" },
-  { pregunta: "Facturas vencidas / aging por factura", query: "facturas_vencidas" },
-  { pregunta: "Aging de cartera agrupado por cliente", query: "aging_clientes" },
-  { pregunta: "Cobros / pagos recibidos del período", query: "cobros_del_periodo" },
-  { pregunta: "Compras por proveedor", query: "compras_por_proveedor" },
-  { pregunta: "Pedidos con entrega vencida", query: "pedidos_retrasados" },
-  { pregunta: "Margen bruto por artículo", query: "margen_por_articulo" },
-  { pregunta: "Stock de un artículo por almacén", query: "stock_por_almacen" },
-  { pregunta: "Artículos sin movimiento / inmovilizados", query: "items_sin_movimiento" },
-  { pregunta: "Órdenes de producción abiertas", query: "ops_abiertas" },
-  { pregunta: "Clientes sin compras / inactivos", query: "clientes_inactivos" },
+export type CatalogEntry = { name: string; description: string }
+
+// Fallback estático usado cuando el backend no está disponible al construir el prompt.
+// El backend es la fuente de verdad — se sobreescribe en runtime via buildStaticSystemPrompt.
+const CATALOG_FALLBACK: CatalogEntry[] = [
+  { name: "ventas_por_periodo", description: "Ventas/facturas del mes o período" },
+  { name: "top_clientes_por_facturacion", description: "Top clientes por facturación" },
+  { name: "ventas_por_vendedor", description: "Ventas por vendedor" },
+  { name: "facturas_vencidas", description: "Facturas vencidas / aging por factura" },
+  { name: "aging_clientes", description: "Aging de cartera agrupado por cliente" },
+  { name: "cobros_del_periodo", description: "Cobros / pagos recibidos del período" },
+  { name: "compras_por_proveedor", description: "Compras por proveedor" },
+  { name: "pedidos_retrasados", description: "Pedidos con entrega vencida" },
+  { name: "margen_por_articulo", description: "Margen bruto por artículo" },
+  { name: "stock_por_almacen", description: "Stock de un artículo por almacén" },
+  { name: "items_sin_movimiento", description: "Artículos sin movimiento / inmovilizados" },
+  { name: "ops_abiertas", description: "Órdenes de producción abiertas" },
+  { name: "clientes_inactivos", description: "Clientes sin compras / inactivos" },
 ]
 
-function buildCatalogTable(): string {
+function buildCatalogTable(entries: CatalogEntry[]): string {
   const header = "| Si el usuario pregunta por… | Usa esta query del catálogo |\n|---|---|"
-  const rows = CATALOG_ENTRIES.map((e) => `| ${e.pregunta} | ${e.query} |`).join("\n")
+  const rows = entries.map((e) => `| ${e.description} | ${e.name} |`).join("\n")
   return `${header}\n${rows}`
 }
 
@@ -167,10 +171,11 @@ function buildSapContextSection(ctx: SapContext): string {
  * Apta para prompt caching de 1h: el contenido es idéntico entre requests
  * del mismo tenant, por lo que Anthropic puede reutilizarla sin re-procesar.
  */
-export function buildStaticSystemPrompt(tenant: TenantId): string {
+export function buildStaticSystemPrompt(tenant: TenantId, catalogEntries?: CatalogEntry[]): string {
   const profile = getTenantProfile(tenant)
   const endpointSections = buildEndpointSections(profile.modulosActivos)
   const tenantContext = buildTenantContext(tenant)
+  const catalog = catalogEntries ?? CATALOG_FALLBACK
 
   return `Eres el asistente de SAP Business One de **${profile.nombre}**.
 Empresa activa: ${profile.nombre} (tenant: ${tenant}).
@@ -515,7 +520,7 @@ Para calcular la Ganancia Bruta y el Margen Bruto de manera oficial para Tamapri
 
 Antes de escribir SQL con consultar_sql, verifica si la consulta encaja con una query del catálogo:
 
-${buildCatalogTable()}
+${buildCatalogTable(catalog)}
 
 **Las queries del catálogo usan SQL HANA nativo** — las restricciones listadas abajo (ROUND, COALESCE, ADD_DAYS, etc.) NO aplican a ellas. Solo aplican a consultar_sql.
 
