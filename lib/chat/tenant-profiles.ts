@@ -59,5 +59,7 @@ export const TENANT_PROFILES: Record<TenantId, TenantProfile> = {
 }
 
 export function getTenantProfile(tenant: TenantId): TenantProfile {
-  return TENANT_PROFILES[tenant]
+  const profile = TENANT_PROFILES[tenant]
+  if (!profile) throw new Error(`Tenant desconocido: "${tenant}"`)
+  return profile
 }

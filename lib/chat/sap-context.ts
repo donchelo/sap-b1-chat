@@ -61,13 +61,18 @@ export async function fetchSapContext(client: BackendClient, tenant: string): Pr
     vendedores: rawSlp.filter((s) => s.SalesEmployeeCode > 0).map((s) => ({ code: s.SalesEmployeeCode, name: s.SalesEmployeeName })),
     centrosCosto: rawCC.map((c) => ({ code: c.CenterCode, name: c.CenterName })),
     gruposItem: rawIG.map((g) => ({ code: g.Number, name: g.GroupName })),
-    camposPersonalizados: rawCF
-      .filter((f) => f.FieldID && f.TableName)
-      .reduce<CustomField[]>((acc, f) => {
-        if (acc.filter((x) => x.table === f.TableName).length >= 40) return acc
-        acc.push({ table: f.TableName, fieldId: `U_${f.FieldID}`, name: f.Name ?? f.FieldID, description: f.Description ?? "" })
-        return acc
-      }, []),
+    camposPersonalizados: (() => {
+      const tableCount = new Map<string, number>()
+      return rawCF
+        .filter((f) => f.FieldID && f.TableName)
+        .reduce<CustomField[]>((acc, f) => {
+          const count = tableCount.get(f.TableName) ?? 0
+          if (count >= 40) return acc
+          tableCount.set(f.TableName, count + 1)
+          acc.push({ table: f.TableName, fieldId: `U_${f.FieldID}`, name: f.Name ?? f.FieldID, description: f.Description ?? "" })
+          return acc
+        }, [])
+    })(),
   }
 
   cache.set(tenant, { context, expiresAt: Date.now() + TTL_MS })
