@@ -53,8 +53,8 @@ function buildDocUrl(entityKey: string, id: string, expand?: string, select?: st
   const sapEntity = cfg?.sapEntity ?? entityKey
   const key = cfg?.keyType === "string" ? `('${encodeURIComponent(id)}')` : `(${id})`
   const parts: string[] = []
-  if (expand) parts.push(`$expand=${encodeURIComponent(expand)}`)
-  if (select) parts.push(`$select=${encodeURIComponent(select)}`)
+  if (expand) parts.push(`$expand=${expand}`)
+  if (select) parts.push(`$select=${select}`)
   return `/${sapEntity}${key}${parts.length ? "?" + parts.join("&") : ""}`
 }
 
@@ -67,11 +67,11 @@ function buildODataUrl(entityKey: string, query: Record<string, string>): string
   const filters: string[] = []
   if (cfg?.defaultFilter) filters.push(cfg.defaultFilter)
   if (query.filter) filters.push(query.filter)
-  if (filters.length) parts.push(`$filter=${encodeURIComponent(filters.join(" and "))}`)
+  if (filters.length) parts.push(`$filter=${filters.join(" and ")}`)
   const select = query.select || cfg?.selectDefault
-  if (select) parts.push(`$select=${encodeURIComponent(select)}`)
-  if (query.orderby) parts.push(`$orderby=${encodeURIComponent(query.orderby)}`)
-  if (query.expand) parts.push(`$expand=${encodeURIComponent(query.expand)}`)
+  if (select) parts.push(`$select=${select}`)
+  if (query.orderby) parts.push(`$orderby=${query.orderby}`)
+  if (query.expand) parts.push(`$expand=${query.expand}`)
   const sapEntity = cfg?.sapEntity ?? entityKey
   return `/${sapEntity}?${parts.join("&")}`
 }
@@ -794,6 +794,7 @@ export async function POST(req: Request) {
             }),
             execute: async ({ confirmar, ...header }: { confirmar: boolean; cardCode: string; lines: unknown[]; docDate?: string; dueDate?: string; comments?: string }, { toolCallId }) => {
               writer.write({ type: "data-tool-status", data: { toolCallId, text: `Validando pedido para ${header.cardCode}…` } } as never)
+              if (!confirmar) return { preview: header, mensaje: "Vista previa del pedido. Confirma para validar crédito/stock y crear en SAP." }
               try {
                 const data = await client.post<unknown>("/workflows/validate-and-create-order", { ...header, confirmar })
                 return { result: data }
@@ -810,6 +811,7 @@ export async function POST(req: Request) {
             }),
             execute: async ({ defaultSupplier, supplierByWarehouse, confirmar }: { defaultSupplier: string; supplierByWarehouse?: string; confirmar: boolean }, { toolCallId }) => {
               writer.write({ type: "data-tool-status", data: { toolCallId, text: "Analizando faltantes y generando plan…" } } as never)
+              if (!confirmar) return { preview: { defaultSupplier, supplierByWarehouse }, mensaje: "Vista previa del plan de reposición. Confirma para crear las OCs en SAP." }
               try {
                 const data = await client.post<unknown>("/workflows/replenish-shortages", { defaultSupplier, supplierByWarehouse, confirmar })
                 return { result: data }
@@ -1013,11 +1015,11 @@ export async function POST(req: Request) {
             description: "Ejecuta una acción en un documento: Cancel, Close, Reopen. REGLA: confirmar=false primero — puede ser irreversible.",
             inputSchema: z.object({
               endpoint: z.string(),
-              docEntry: z.string(),
+              docEntry: z.coerce.number().int().positive().describe("DocEntry numérico del documento"),
               accion: z.string().describe("Cancel, Close o Reopen"),
               confirmar: z.boolean(),
             }),
-            execute: async ({ endpoint, docEntry, accion, confirmar }: { endpoint: string; docEntry: string; accion: string; confirmar: boolean }, { toolCallId }) => {
+            execute: async ({ endpoint, docEntry, accion, confirmar }: { endpoint: string; docEntry: number; accion: string; confirmar: boolean }, { toolCallId }) => {
               const entityKey = endpoint.replace(/^\//, "")
               const cfg = ENTITY_MAP[entityKey]
               if (!cfg) return { error: { code: "INVALID_ENDPOINT", message: `Endpoint '${endpoint}' no reconocido.`, retryable: false } }
