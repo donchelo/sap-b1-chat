@@ -37,6 +37,6 @@ export const ENTITY_MAP: Record<string, EntityConfig> = {
   "contabilidad/asientos": { sapEntity: "JournalEntries", keyType: "number", selectDefault: "JdtNum,RefDate,Memo,Debit,Credit" },
   "contabilidad/cuentas": { sapEntity: "ChartOfAccounts", keyType: "string", selectDefault: "Code,Name,AccountType,ActiveAccount" },
   "produccion/ordenes": { sapEntity: "ProductionOrders", keyType: "number", allowedActions: ["Cancel", "Close"], selectDefault: "DocEntry,ItemCode,PlannedQty,CmpltQty,DueDate,Status" },
-  "produccion/bom": { sapEntity: "ProductionOrders", keyType: "number", selectDefault: "DocEntry,ItemCode,PlannedQty,Status" },
+  "produccion/bom": { sapEntity: "ProductionBillOfMaterials", keyType: "number", selectDefault: "DocEntry,ItemCode,PlannedQty,Status" },
   "rrhh/empleados": { sapEntity: "EmployeesInfo", keyType: "number", selectDefault: "EmployeeID,FirstName,LastName,Department,Position,Active" },
 }
