@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
+import { verifySession } from "@ai4u/mc-sso"
 
 // mc-auth is the SSO handoff endpoint — always public
 const PUBLIC_PATHS = ["/api/mc-auth", "/_next", "/favicon"]
@@ -10,20 +11,22 @@ export function proxy(req: NextRequest) {
 
   if (PUBLIC_PATHS.some(p => pathname.startsWith(p))) return NextResponse.next()
 
-  // Dev-mode escape ONLY outside production. In production, a missing secret
-  // is a misconfiguration — fail closed (block) instead of silently allowing.
-  if (!process.env.MISSION_CONTROL_SECRET) {
+  const secret = process.env.MISSION_CONTROL_SECRET ?? ""
+
+  // In production, a missing secret is a misconfiguration — fail closed.
+  if (!secret) {
     if (process.env.NODE_ENV === "production") {
       return NextResponse.json({ error: "Servidor no configurado" }, { status: 500 })
     }
     return NextResponse.next()
   }
 
-  // Valid session = non-empty cookie (verified in depth by session.ts in API routes)
-  const session = req.cookies.get(COOKIE)?.value ?? ""
-  if (session.length > 0) return NextResponse.next()
+  const token = req.cookies.get(COOKIE)?.value ?? ""
+  const valid = verifySession(token, secret)
 
-  // No session: API calls → 401, pages → lock screen (handled by page.tsx)
+  if (valid) return NextResponse.next()
+
+  // No valid session: API calls → 401, pages → lock screen (handled by page.tsx)
   if (pathname.startsWith("/api/")) {
     return NextResponse.json({ error: "No autorizado" }, { status: 401 })
   }
