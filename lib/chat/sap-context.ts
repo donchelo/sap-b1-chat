@@ -1,0 +1,75 @@
+import type { BackendClient } from "@/lib/backend-client"
+
+export interface Warehouse { code: string; name: string }
+export interface SalesPerson { code: number; name: string }
+export interface CostCenter { code: string; name: string }
+export interface ItemGroup { code: number; name: string }
+export interface CustomField { table: string; fieldId: string; name: string; description: string }
+
+export interface SapContext {
+  almacenes: Warehouse[]
+  vendedores: SalesPerson[]
+  centrosCosto: CostCenter[]
+  gruposItem: ItemGroup[]
+  camposPersonalizados: CustomField[]
+}
+
+const RELEVANT_TABLES = [
+  "OINV","INV1","ORDR","RDR1","OPOR","POR1","OPCH","PCH1","OPDN","PDN1",
+  "OITM","OCRD","ORCT","OJDT",
+]
+
+interface CacheEntry { context: SapContext; expiresAt: number }
+const cache = new Map<string, CacheEntry>()
+const TTL_MS = 60 * 60 * 1000
+
+async function safeGet<T>(client: BackendClient, path: string): Promise<T[]> {
+  try {
+    const res = await client.get<{ value?: T[] }>(path)
+    return res.value ?? []
+  } catch {
+    return []
+  }
+}
+
+export async function fetchSapContext(client: BackendClient, tenant: string): Promise<SapContext> {
+  const cached = cache.get(tenant)
+  if (cached && cached.expiresAt > Date.now()) return cached.context
+
+  const tablesFilter = RELEVANT_TABLES.map((t) => `TableName eq '${t}'`).join(" or ")
+
+  const [rawWh, rawSlp, rawCC, rawIG, rawCF] = await Promise.all([
+    safeGet<{ WarehouseCode: string; WarehouseName: string }>(
+      client, `/odata?path=${encodeURIComponent("/Warehouses?$select=WarehouseCode,WarehouseName&$top=200")}`
+    ),
+    safeGet<{ SalesEmployeeCode: number; SalesEmployeeName: string }>(
+      client, `/odata?path=${encodeURIComponent("/SalesPersons?$select=SalesEmployeeCode,SalesEmployeeName&$top=200")}`
+    ),
+    safeGet<{ CenterCode: string; CenterName: string }>(
+      client, `/odata?path=${encodeURIComponent("/ProfitCenters?$select=CenterCode,CenterName&$top=200")}`
+    ),
+    safeGet<{ Number: number; GroupName: string }>(
+      client, `/odata?path=${encodeURIComponent("/ItemGroups?$select=Number,GroupName&$top=200")}`
+    ),
+    safeGet<{ TableName: string; FieldID: string; Name: string; Description: string }>(
+      client, `/odata?path=${encodeURIComponent(`/UserFieldsMD?$select=TableName,FieldID,Name,Description&$filter=${tablesFilter}&$top=500`)}`
+    ),
+  ])
+
+  const context: SapContext = {
+    almacenes: rawWh.map((w) => ({ code: w.WarehouseCode, name: w.WarehouseName })),
+    vendedores: rawSlp.filter((s) => s.SalesEmployeeCode > 0).map((s) => ({ code: s.SalesEmployeeCode, name: s.SalesEmployeeName })),
+    centrosCosto: rawCC.map((c) => ({ code: c.CenterCode, name: c.CenterName })),
+    gruposItem: rawIG.map((g) => ({ code: g.Number, name: g.GroupName })),
+    camposPersonalizados: rawCF
+      .filter((f) => f.FieldID && f.TableName)
+      .reduce<CustomField[]>((acc, f) => {
+        if (acc.filter((x) => x.table === f.TableName).length >= 40) return acc
+        acc.push({ table: f.TableName, fieldId: `U_${f.FieldID}`, name: f.Name ?? f.FieldID, description: f.Description ?? "" })
+        return acc
+      }, []),
+  }
+
+  cache.set(tenant, { context, expiresAt: Date.now() + TTL_MS })
+  return context
+}
