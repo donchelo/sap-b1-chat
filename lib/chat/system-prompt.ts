@@ -2,6 +2,28 @@ export type TenantId = string
 import { getTenantProfile } from "./tenant-profiles"
 import type { SapContext } from "./sap-context"
 
+const CATALOG_ENTRIES: Array<{ pregunta: string; query: string }> = [
+  { pregunta: "Ventas/facturas del mes o período", query: "ventas_por_periodo" },
+  { pregunta: "Top clientes por facturación", query: "top_clientes_por_facturacion" },
+  { pregunta: "Ventas por vendedor", query: "ventas_por_vendedor" },
+  { pregunta: "Facturas vencidas / aging por factura", query: "facturas_vencidas" },
+  { pregunta: "Aging de cartera agrupado por cliente", query: "aging_clientes" },
+  { pregunta: "Cobros / pagos recibidos del período", query: "cobros_del_periodo" },
+  { pregunta: "Compras por proveedor", query: "compras_por_proveedor" },
+  { pregunta: "Pedidos con entrega vencida", query: "pedidos_retrasados" },
+  { pregunta: "Margen bruto por artículo", query: "margen_por_articulo" },
+  { pregunta: "Stock de un artículo por almacén", query: "stock_por_almacen" },
+  { pregunta: "Artículos sin movimiento / inmovilizados", query: "items_sin_movimiento" },
+  { pregunta: "Órdenes de producción abiertas", query: "ops_abiertas" },
+  { pregunta: "Clientes sin compras / inactivos", query: "clientes_inactivos" },
+]
+
+function buildCatalogTable(): string {
+  const header = "| Si el usuario pregunta por… | Usa esta query del catálogo |\n|---|---|"
+  const rows = CATALOG_ENTRIES.map((e) => `| ${e.pregunta} | ${e.query} |`).join("\n")
+  return `${header}\n${rows}`
+}
+
 const ALL_ENDPOINT_SECTIONS: Record<string, { titulo: string; filas: string }> = {
   compras: {
     titulo: "Compras",
@@ -493,21 +515,7 @@ Para calcular la Ganancia Bruta y el Margen Bruto de manera oficial para Tamapri
 
 Antes de escribir SQL con consultar_sql, verifica si la consulta encaja con una query del catálogo:
 
-| Si el usuario pregunta por… | Usa esta query del catálogo |
-|---|---|
-| Ventas/facturas del mes o período | ventas_por_periodo |
-| Top clientes por facturación | top_clientes_por_facturacion |
-| Ventas por vendedor | ventas_por_vendedor |
-| Facturas vencidas / aging por factura | facturas_vencidas |
-| Aging de cartera agrupado por cliente | aging_clientes |
-| Cobros / pagos recibidos del período | cobros_del_periodo |
-| Compras por proveedor | compras_por_proveedor |
-| Pedidos con entrega vencida | pedidos_retrasados |
-| Margen bruto por artículo | margen_por_articulo |
-| Stock de un artículo por almacén | stock_por_almacen |
-| Artículos sin movimiento / inmovilizados | items_sin_movimiento |
-| Órdenes de producción abiertas | ops_abiertas |
-| Clientes sin compras / inactivos | clientes_inactivos |
+${buildCatalogTable()}
 
 **Las queries del catálogo usan SQL HANA nativo** — las restricciones listadas abajo (ROUND, COALESCE, ADD_DAYS, etc.) NO aplican a ellas. Solo aplican a consultar_sql.
 
