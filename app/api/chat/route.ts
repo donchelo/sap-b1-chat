@@ -1,112 +1,186 @@
-import { convertToModelMessages } from "ai"
-import { getApiKey } from "@/app/lib/session"
+import { createAnthropic } from "@ai-sdk/anthropic"
+import {
+  streamText, stepCountIs, pruneMessages,
+  createUIMessageStream, createUIMessageStreamResponse,
+} from "ai"
+import type { ModelMessage, UIMessageStreamWriter } from "ai"
+import { getTenantId, getApiKey } from "@/app/lib/session"
+import { BackendClient } from "@/lib/backend-client"
+import { ENTITY_MAP } from "@/lib/entity-map"
+import { buildStaticSystemPrompt, buildDynamicSystemContext } from "@/lib/chat/system-prompt"
+import { fetchSapContext } from "@/lib/chat/sap-context"
 
-const BACKEND_URL =
-  process.env.BACKEND_URL ??
-  process.env.NEXT_PUBLIC_BACKEND_URL ??
-  "http://localhost:4100"
+export const maxDuration = 300
 
-const PROXY_TIMEOUT_MS = 120_000 // 2 min — ajusta si SAP tarda más
+// ── Error classifier ────────────────────────────────────────────
+type SapError = { code: string; message: string; retryable: boolean }
 
+function classifySapError(err: unknown): { error: SapError } {
+  const msg = err instanceof Error ? err.message : String(err)
+  if (msg.includes("timeout"))
+    return { error: { code: "SAP_TIMEOUT", message: "SAP B1 no respondió en el tiempo esperado.", retryable: true } }
+  if (msg.includes("401") || msg.toLowerCase().includes("login"))
+    return { error: { code: "SAP_AUTH", message: "Sesión SAP expirada. Contacta al administrador.", retryable: false } }
+  if (msg.includes("404"))
+    return { error: { code: "SAP_NOT_FOUND", message: msg, retryable: false } }
+  return { error: { code: "SAP_ERROR", message: msg, retryable: false } }
+}
+
+// ── Model selection ──────────────────────────────────────────────
+const ALLOWED_MODELS = ["claude-haiku-4.5", "claude-sonnet-4.6", "claude-opus-4.8"] as const
+type AllowedModel = (typeof ALLOWED_MODELS)[number]
+const DEFAULT_MODEL: AllowedModel = "claude-sonnet-4.6"
+
+type ThinkingConfig = { type: "adaptive"; display?: "summarized" | "omitted" }
+type EffortLevel = "low" | "medium" | "high" | "xhigh" | "max"
+type ModelConfig = { thinking?: ThinkingConfig; effort?: EffortLevel }
+
+const MODEL_CONFIGS: Record<AllowedModel, ModelConfig> = {
+  "claude-haiku-4.5":  {},
+  "claude-sonnet-4.6": { thinking: { type: "adaptive" }, effort: "medium" },
+  "claude-opus-4.8":   { thinking: { type: "adaptive", display: "summarized" }, effort: "high" },
+}
+
+function toApiSlug(model: AllowedModel): string {
+  return model.replace(/(\d)\.(\d)/g, "$1-$2")
+}
+
+// ── OData URL builders ───────────────────────────────────────────
+function buildDocUrl(entityKey: string, id: string, expand?: string, select?: string): string {
+  const cfg = ENTITY_MAP[entityKey]
+  const sapEntity = cfg?.sapEntity ?? entityKey
+  const key = cfg?.keyType === "string" ? `('${encodeURIComponent(id)}')` : `(${id})`
+  const parts: string[] = []
+  if (expand) parts.push(`$expand=${encodeURIComponent(expand)}`)
+  if (select) parts.push(`$select=${encodeURIComponent(select)}`)
+  return `/${sapEntity}${key}${parts.length ? "?" + parts.join("&") : ""}`
+}
+
+function buildODataUrl(entityKey: string, query: Record<string, string>): string {
+  const parts: string[] = []
+  const top = Math.min(parseInt(query.top ?? "50", 10) || 50, 500)
+  parts.push(`$top=${top}`)
+  if (query.skip) parts.push(`$skip=${query.skip}`)
+  const cfg = ENTITY_MAP[entityKey]
+  const filters: string[] = []
+  if (cfg?.defaultFilter) filters.push(cfg.defaultFilter)
+  if (query.filter) filters.push(query.filter)
+  if (filters.length) parts.push(`$filter=${encodeURIComponent(filters.join(" and "))}`)
+  const select = query.select || cfg?.selectDefault
+  if (select) parts.push(`$select=${encodeURIComponent(select)}`)
+  if (query.orderby) parts.push(`$orderby=${encodeURIComponent(query.orderby)}`)
+  if (query.expand) parts.push(`$expand=${encodeURIComponent(query.expand)}`)
+  const sapEntity = cfg?.sapEntity ?? entityKey
+  return `/${sapEntity}?${parts.join("&")}`
+}
+
+// ── Keywords para selección de modelo ────────────────────────────
+const complexReportKeywords = [
+  "reporte","informe","kpi","comparar","facturacion","facturado",
+  "mensual","semanal","semana","trimestre","evolucion","crecimiento",
+  "ventas","compras","contabilidad","asiento","grafico","dashboard",
+  "top","sql","query","analizar","analisis","consolidado","balance",
+  "hacer","crear","actualizar","modificar",
+  "margen","rentabilidad","porcentaje","ticket","conversion",
+  "vencido","cartera","cobros","pareto","historial",
+]
+
+// ── CORE_TABLES pre-registradas ──────────────────────────────────
+const CORE_TABLES = [
+  "OINV","INV1","OITM","OITB","OCRD","OSLP","ORCT","RCT2",
+  "ORDR","RDR1","OQUT","QUT1","OPOR","POR1","OIGN","IGN1","OWOR","WOR1",
+]
+
+// Suppress unused variable warnings — these are used by tools added in Tasks 6-12
+void classifySapError
+void buildDocUrl
+void buildODataUrl
+
+// ── Handler principal ────────────────────────────────────────────
 export async function POST(req: Request) {
-  // API key is resolved server-side from the session cookie — never from the client body
-  const apiKey = await getApiKey()
-  if (!apiKey) {
+  const [tenantId, apiKey] = await Promise.all([getTenantId(), getApiKey()])
+  if (!tenantId || !apiKey) {
     return Response.json({ error: "Sesión no válida. Accede desde Mission Control." }, { status: 401 })
   }
 
-  const body = await req.json()
-  const { messages, model } = body
-
-  // UIMessage[] → ModelMessage[] (preserva tool calls, tool results, etc.)
-  const modelMessages = await convertToModelMessages(messages)
-
-  const controller = new AbortController()
-  const timeoutId = setTimeout(() => controller.abort(), PROXY_TIMEOUT_MS)
-
-  let upstream: Response
-  try {
-    upstream = await fetch(`${BACKEND_URL}/api/v1/chat`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-API-Key": apiKey,
-        // Tell the backend this client expects the UI message stream protocol
-        "x-vercel-ai-ui-message-stream": "v1",
-      },
-      body: JSON.stringify({ messages: modelMessages, model }),
-      signal: controller.signal,
-    })
-  } catch (err) {
-    clearTimeout(timeoutId)
-    const isAbort = err instanceof Error && err.name === "AbortError"
-    const message = isAbort
-      ? `Tiempo de espera agotado (>${PROXY_TIMEOUT_MS / 1000}s) — el backend no respondió`
-      : `Backend no disponible (${BACKEND_URL}) — verifique que el servicio esté activo`
-    return Response.json({ error: message }, { status: isAbort ? 504 : 502 })
-  }
-  clearTimeout(timeoutId)
-
-  if (!upstream.ok) {
-    const err = await upstream.json().catch(() => ({ error: upstream.statusText }))
-    return Response.json(
-      { error: err.error ?? upstream.statusText },
-      { status: upstream.status },
-    )
+  const body = await req.json().catch(() => null)
+  if (!body || !Array.isArray(body.messages)) {
+    return Response.json({ error: "Body inválido. Se esperaba { messages: [...] }" }, { status: 400 })
   }
 
-  const upstreamContentType = upstream.headers.get("Content-Type") ?? ""
-  const isUIMessageStream =
-    upstream.headers.has("x-vercel-ai-ui-message-stream") ||
-    upstreamContentType.includes("text/event-stream")
+  const client = new BackendClient(tenantId, apiKey)
 
-  const responseHeaders = new Headers({
-    "Content-Type": "text/event-stream; charset=utf-8",
-    "Cache-Control": "no-cache",
-    "x-vercel-ai-ui-message-stream": "v1",
+  // Model selection
+  const lastUserMsg = [...(body.messages as ModelMessage[])].reverse().find((m) => m.role === "user")
+  const userText = lastUserMsg?.content ? String(lastUserMsg.content) : ""
+  const userTextNorm = userText.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "")
+  const isComplexQuery = complexReportKeywords.some((kw) => userTextNorm.includes(kw))
+
+  const requestedModel = typeof body.model === "string" ? body.model : ""
+  const selectedModel: AllowedModel = ALLOWED_MODELS.includes(requestedModel as AllowedModel)
+    ? (requestedModel as AllowedModel)
+    : DEFAULT_MODEL
+  const modelCfg = MODEL_CONFIGS[selectedModel]
+  const maxSteps = isComplexQuery ? 20 : 12
+
+  // Message pruning (no sessions — historial viene del cliente)
+  const pruned = pruneMessages({
+    messages: body.messages as ModelMessage[],
+    reasoning: "before-last-message",
+    toolCalls: "before-last-3-messages",
+    emptyMessages: "remove",
   })
-  const sessionId = upstream.headers.get("X-Session-Id")
-  if (sessionId) responseHeaders.set("X-Session-Id", sessionId)
+  const allMessages = pruned.length > 60 ? pruned.slice(pruned.length - 60) : pruned
 
-  // New backend: already emits the UI message stream protocol → pass through
-  if (isUIMessageStream) {
-    return new Response(upstream.body, { headers: responseHeaders })
-  }
+  // discoveredTables — estado por request
+  const discoveredTables = new Set<string>(CORE_TABLES)
 
-  // Legacy backend: plain text stream → wrap as minimal UI message stream
-  // so DefaultChatTransport (parseJsonEventStream) can consume it.
-  const textId = crypto.randomUUID()
-  const enc = new TextEncoder()
+  // Anthropic key per tenant
+  const anthropicKey =
+    process.env[`${tenantId.toUpperCase()}_ANTHROPIC_API_KEY`] ??
+    process.env.ANTHROPIC_API_KEY ??
+    ""
 
-  function sseEvent(chunk: Record<string, unknown>): Uint8Array {
-    return enc.encode(`data: ${JSON.stringify(chunk)}\n\n`)
-  }
+  const anthropic = createAnthropic({ apiKey: anthropicKey })
 
-  const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>()
-  const writer = writable.getWriter()
+  let writer!: UIMessageStreamWriter
 
-  ;(async () => {
-    try {
-      writer.write(sseEvent({ type: "start-step" }))
-      writer.write(sseEvent({ type: "text-start", id: textId }))
+  const stream = createUIMessageStream({
+    execute: async (ctx) => {
+      writer = ctx.writer
+      writer.write({ type: "data-status", data: { text: "Conectando a SAP B1…" } } as never)
+      const sapCtx = await fetchSapContext(client, tenantId)
+      writer.write({ type: "data-status", data: { text: "Analizando tu consulta…" } } as never)
 
-      const reader = upstream.body!.getReader()
-      const dec = new TextDecoder()
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        const delta = dec.decode(value, { stream: true })
-        if (delta) writer.write(sseEvent({ type: "text-delta", id: textId, delta }))
+      const result = streamText({
+        model: anthropic(toApiSlug(selectedModel)),
+        system: [
+          { role: "system" as const, content: buildStaticSystemPrompt(tenantId) },
+          { role: "system" as const, content: buildDynamicSystemContext(tenantId, sapCtx) },
+        ],
+        messages: allMessages,
+        stopWhen: stepCountIs(maxSteps),
+        providerOptions: {
+          anthropic: {
+            ...(modelCfg.thinking ? { thinking: modelCfg.thinking } : {}),
+            ...(modelCfg.effort ? { effort: modelCfg.effort } : {}),
+            cacheControl: { type: "ephemeral" },
+          },
+        },
+        tools: {
+          // Tools added in Tasks 6-12
+        },
+      })
+
+      for await (const chunk of result.toUIMessageStream({ sendReasoning: true })) {
+        writer.write(chunk)
       }
+    },
+  })
 
-      writer.write(sseEvent({ type: "text-end", id: textId }))
-      writer.write(sseEvent({ type: "finish-step" }))
-    } catch {
-      // stream aborted by client — nothing to do
-    } finally {
-      writer.close()
-    }
-  })()
+  // Suppress unused variable warnings — used by tools added in Tasks 6-12
+  void client
+  void discoveredTables
 
-  return new Response(readable, { headers: responseHeaders })
+  return createUIMessageStreamResponse({ stream })
 }
