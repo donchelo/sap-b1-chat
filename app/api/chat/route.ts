@@ -2,10 +2,11 @@ import { createAnthropic } from "@ai-sdk/anthropic"
 import {
   streamText, stepCountIs, pruneMessages,
   createUIMessageStream, createUIMessageStreamResponse,
+  convertToModelMessages,
   tool,
 } from "ai"
 import { z } from "zod"
-import type { ModelMessage, UIMessageStreamWriter } from "ai"
+import type { UIMessage, ModelMessage, UIMessageStreamWriter } from "ai"
 import { getTenantId, getApiKey } from "@/app/lib/session"
 import { BackendClient } from "@/lib/backend-client"
 import { ENTITY_MAP } from "@/lib/entity-map"
@@ -105,11 +106,23 @@ export async function POST(req: Request) {
     return Response.json({ error: "Body inválido. Se esperaba { messages: [...] }" }, { status: 400 })
   }
 
+  let modelMessages: ModelMessage[]
+  try {
+    modelMessages = await convertToModelMessages(body.messages as UIMessage[])
+  } catch {
+    return Response.json({ error: "Formato de mensajes inválido." }, { status: 400 })
+  }
+
   const client = new BackendClient(tenantId, apiKey)
 
   // Model selection
-  const lastUserMsg = [...(body.messages as ModelMessage[])].reverse().find((m) => m.role === "user")
-  const userText = lastUserMsg?.content ? String(lastUserMsg.content) : ""
+  const lastUserMsg = [...modelMessages].reverse().find((m) => m.role === "user")
+  const userContent = lastUserMsg?.content
+  const userText = typeof userContent === "string"
+    ? userContent
+    : Array.isArray(userContent)
+      ? userContent.filter((p) => p.type === "text").map((p) => (p as { type: "text"; text: string }).text).join(" ")
+      : ""
   const userTextNorm = userText.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "")
   const isComplexQuery = complexReportKeywords.some((kw) => userTextNorm.includes(kw))
 
@@ -122,7 +135,7 @@ export async function POST(req: Request) {
 
   // Message pruning (no sessions — historial viene del cliente)
   const pruned = pruneMessages({
-    messages: body.messages as ModelMessage[],
+    messages: modelMessages,
     reasoning: "before-last-message",
     toolCalls: "before-last-3-messages",
     emptyMessages: "remove",
