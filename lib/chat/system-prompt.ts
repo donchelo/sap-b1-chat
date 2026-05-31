@@ -221,6 +221,133 @@ Para estas tablas ve directamente a consultar_sql o listar_registros.
 
 ---
 
+## SCHEMA DE TABLAS CORE (columnas verificadas)
+
+### OINV — Facturas de clientes (cabecera)
+| Campo | Tipo | Descripción |
+|-------|------|-------------|
+| DocEntry | Integer | Clave primaria interna |
+| DocNum | Integer | Número de factura visible |
+| CardCode | String | Código del cliente |
+| CardName | String | Nombre del cliente |
+| DocDate | Date | Fecha de contabilización (YYYY-MM-DD) |
+| DocDueDate | Date | Fecha de vencimiento |
+| DocTotal | Decimal | Total neto + impuestos |
+| VatSum | Decimal | Total impuestos (IVA) |
+| DiscSum | Decimal | Descuento total aplicado |
+| PaidToDate | Decimal | Monto ya cobrado |
+| DocStatus | String | 'O' = Abierta, 'C' = Cerrada |
+| SlpCode | Integer | Código del vendedor |
+| CANCELED | String | 'N' = vigente, 'Y' = cancelada — SIEMPRE filtra AND CANCELED = 'N' |
+| Comments | String | Comentarios |
+> ⚠️ GrssProfit NO existe en OINV. Usa INV1.GrssProfit con JOIN.
+
+### INV1 — Líneas de facturas de clientes
+| Campo | Tipo | Descripción |
+|-------|------|-------------|
+| DocEntry | Integer | FK a OINV |
+| LineNum | Integer | Número de línea (0-indexed) |
+| ItemCode | String | Código del artículo |
+| Dscription | String | Descripción del artículo |
+| Quantity | Decimal | Cantidad facturada |
+| Price | Decimal | Precio unitario (sin impuesto) |
+| LineTotal | Decimal | Quantity × Price (sin impuesto) |
+| GrssProfit | Decimal | Ganancia bruta de la línea |
+| WhsCode | String | Almacén de salida |
+| ItmsGrpCod | Integer | Código de grupo de artículo |
+
+### ORDR — Pedidos de venta (cabecera)
+| Campo | Tipo | Descripción |
+|-------|------|-------------|
+| DocEntry | Integer | Clave primaria interna |
+| DocNum | Integer | Número de pedido visible |
+| CardCode | String | Código del cliente |
+| CardName | String | Nombre del cliente |
+| DocDate | Date | Fecha del pedido |
+| DocDueDate | Date | Fecha de entrega prometida |
+| DocTotal | Decimal | Total neto + impuestos |
+| DocStatus | String | 'O' = Abierto, 'C' = Cerrado |
+| Comments | String | Comentarios |
+
+### RDR1 — Líneas de pedidos de venta
+| Campo | Tipo | Descripción |
+|-------|------|-------------|
+| DocEntry | Integer | FK a ORDR |
+| LineNum | Integer | Número de línea |
+| ItemCode | String | Código del artículo |
+| Dscription | String | Descripción |
+| Quantity | Decimal | Cantidad solicitada |
+| Price | Decimal | Precio unitario |
+| LineTotal | Decimal | Total de línea |
+| WhsCode | String | Almacén de despacho |
+
+### OCRD — Socios de Negocio (clientes y proveedores)
+| Campo | Tipo | Descripción |
+|-------|------|-------------|
+| CardCode | String | Código del socio (PK) |
+| CardName | String | Nombre o razón social |
+| CardType | String | En SQL: 'C' = Cliente, 'S' = Proveedor, 'L' = Lead. ⚠️ No uses 'cCustomer' (es valor OData) |
+| GroupCode | Integer | Código de grupo |
+| SlpCode | Integer | Código del vendedor asignado |
+| Balance | Decimal | Saldo de cuenta corriente |
+| Phone1 | String | Teléfono principal |
+| EmailAddress | String | Correo de contacto |
+
+### OITM — Artículos (maestro de productos)
+| Campo | Tipo | Descripción |
+|-------|------|-------------|
+| ItemCode | String | Código único del artículo (PK) |
+| ItemName | String | Nombre del artículo |
+| ItmsGrpCod | Integer | Código de grupo de artículo |
+| AvgStdPrice | Decimal | Costo promedio ponderado |
+| OnHand | Decimal | Stock físico disponible |
+| IsCommited | Decimal | Stock comprometido en pedidos |
+| OnOrder | Decimal | Stock en camino (en OC abiertas) |
+| SellItem | String | 'Y' / 'N' — si se vende |
+| BuyItem | String | 'Y' / 'N' — si se compra |
+
+### ORCT — Cobros recibidos (cabecera)
+| Campo | Tipo | Descripción |
+|-------|------|-------------|
+| DocEntry | Integer | Clave primaria interna |
+| DocNum | Integer | Número de cobro visible |
+| CardCode | String | Código del cliente |
+| CardName | String | Nombre del cliente |
+| DocDate | Date | Fecha de recepción del cobro |
+| DocTotal | Decimal | Total cobrado |
+| Canceled | String | 'N' = vigente, 'Y' = cancelado — filtra AND Canceled = 'N' |
+
+### OPOR — Órdenes de compra (cabecera)
+| Campo | Tipo | Descripción |
+|-------|------|-------------|
+| DocEntry | Integer | Clave primaria interna |
+| DocNum | Integer | Número de orden visible |
+| CardCode | String | Código del proveedor |
+| CardName | String | Nombre del proveedor |
+| DocDate | Date | Fecha de la orden |
+| DocDueDate | Date | Fecha de entrega acordada |
+| DocTotal | Decimal | Total neto + impuestos |
+| DocStatus | String | 'O' = Abierta, 'C' = Cerrada |
+
+### POR1 — Líneas de órdenes de compra
+| Campo | Tipo | Descripción |
+|-------|------|-------------|
+| DocEntry | Integer | FK a OPOR |
+| LineNum | Integer | Número de línea |
+| ItemCode | String | Código del artículo |
+| Dscription | String | Descripción |
+| Quantity | Decimal | Cantidad pedida |
+| Price | Decimal | Precio unitario acordado |
+| LineTotal | Decimal | Total de línea |
+
+### OITB — Grupos de artículos
+> ⚠️ **NO ACCESIBLE VÍA SQL** (error 702). Para nombres de grupos, usa el contexto SAP (datos maestros al inicio del chat) o informa que solo tienes el código ItmsGrpCod desde OITM.
+
+### OSLP — Vendedores
+> ⚠️ **NO ACCESIBLE VÍA SQL** (error 702). Usa listar_registros("sistema/vendedores") → devuelve SalesEmployeeCode (= SlpCode) y SalesEmployeeName. Cruza con SlpCode de OINV/ORDR.
+
+---
+
 ${tenantContext}
 
 ---
