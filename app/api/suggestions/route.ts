@@ -1,3 +1,5 @@
+import { timingSafeEqual } from "crypto"
+
 // ─── /api/suggestions ────────────────────────────────────────────────────────
 // Genera 4 preguntas estratégicas de negocio para el tenant activo,
 // usando el mismo backend de SAP B1 como LLM (no requiere nueva API key).
@@ -62,7 +64,14 @@ export async function POST(req: Request) {
 
   const internalSecret = req.headers.get("x-internal-secret")
   const expected = process.env.MC_INTERNAL_SECRET
-  const isInternal = internalSecret && expected && internalSecret === expected
+  let isInternal = false
+  if (internalSecret && expected) {
+    try {
+      const a = Buffer.from(internalSecret)
+      const b = Buffer.from(expected)
+      isInternal = a.length === b.length && timingSafeEqual(a, b)
+    } catch { /* fall through */ }
+  }
 
   const apiKey   = isInternal ? req.headers.get("x-api-key")   : await getApiKey()
   const tenantId = isInternal ? req.headers.get("x-tenant-id") : await getTenantId()
