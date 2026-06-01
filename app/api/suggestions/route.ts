@@ -57,15 +57,20 @@ function parseQuestions(raw: string): string[] | null {
 }
 
 export async function POST(req: Request) {
-  // API key resolved server-side from session cookie
   const { getApiKey, getTenantId } = await import("@/app/lib/session")
-  const [apiKey, tenantId] = await Promise.all([getApiKey(), getTenantId()])
+  const body = await req.json().catch(() => ({}))
+
+  const internalSecret = req.headers.get("x-internal-secret")
+  const expected = process.env.MC_INTERNAL_SECRET
+  const isInternal = internalSecret && expected && internalSecret === expected
+
+  const apiKey   = isInternal ? req.headers.get("x-api-key")   : await getApiKey()
+  const tenantId = isInternal ? req.headers.get("x-tenant-id") : await getTenantId()
 
   if (!apiKey) {
     return Response.json({ error: "Sesión no válida. Accede desde Mission Control." }, { status: 401 })
   }
 
-  const body = await req.json().catch(() => ({}))
   const { tenantName } = body as { tenantName?: string }
   const resolvedTenant = tenantName?.trim() || tenantId || "la empresa"
 

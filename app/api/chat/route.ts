@@ -6,8 +6,26 @@ import {
   tool,
 } from "ai"
 import { z } from "zod"
+import { timingSafeEqual } from "crypto"
 import type { UIMessage, ModelMessage, UIMessageStreamWriter } from "ai"
 import { getTenantId, getApiKey } from "@/app/lib/session"
+
+function resolveAuth(req: Request): { tenantId: string; sapApiKey: string } | null {
+  const secret = req.headers.get("x-internal-secret")
+  const expected = process.env.MC_INTERNAL_SECRET
+  if (secret && expected) {
+    try {
+      const a = Buffer.from(secret)
+      const b = Buffer.from(expected)
+      if (a.length === b.length && timingSafeEqual(a, b)) {
+        const tenantId = req.headers.get("x-tenant-id")
+        const sapApiKey = req.headers.get("x-api-key")
+        if (tenantId && sapApiKey) return { tenantId, sapApiKey }
+      }
+    } catch { /* fall through to session */ }
+  }
+  return null
+}
 import { BackendClient } from "@/lib/backend-client"
 import { ENTITY_MAP } from "@/lib/entity-map"
 import { buildStaticSystemPrompt, buildDynamicSystemContext, type CatalogEntry } from "@/lib/chat/system-prompt"
@@ -96,7 +114,9 @@ const CORE_TABLES = [
 
 // ── Handler principal ────────────────────────────────────────────
 export async function POST(req: Request) {
-  const [tenantId, apiKey] = await Promise.all([getTenantId(), getApiKey()])
+  const internal = resolveAuth(req)
+  const tenantId = internal?.tenantId ?? await getTenantId()
+  const apiKey   = internal?.sapApiKey ?? await getApiKey()
   if (!tenantId || !apiKey) {
     return Response.json({ error: "Sesión no válida. Accede desde Mission Control." }, { status: 401 })
   }
