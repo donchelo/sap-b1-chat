@@ -163,8 +163,8 @@ function ChatUI() {
   } = useThreads()
 
   const transport = useMemo(
-    () => new DefaultChatTransport({ api: "/api/chat", body: { model: selectedModel } }),
-    [selectedModel],
+    () => new DefaultChatTransport({ api: "/api/chat", body: { model: selectedModel, sessionId: activeThreadId } }),
+    [selectedModel, activeThreadId],
   )
 
   const { messages, sendMessage, status, stop, setMessages, regenerate, error, clearError } =
@@ -175,13 +175,22 @@ function ChatUI() {
 
   const tokenEstimate = useMemo(() => estimateTokens(messages), [messages])
 
-  // Datos reales de uso emitidos por el backend al finalizar cada respuesta
   const latestUsage = useMemo(() => {
     const lastMsg = [...messages].reverse().find(m => m.role === "assistant")
     if (!lastMsg) return null
-    type UsagePart = { type: "data-usage"; data: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number } }
+    type UsagePart = { type: "data-usage"; data: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number, costUsd?: number, savingsUsd?: number } }
     const parts = lastMsg.parts.filter(p => p.type === "data-usage") as UsagePart[]
     return parts.at(-1)?.data ?? null
+  }, [messages])
+
+  // Sumar costos de todos los mensajes en la sesión
+  const totalSessionCost = useMemo(() => {
+    return messages.reduce((sum, msg) => {
+      if (msg.role !== "assistant") return sum
+      const parts = msg.parts.filter(p => p.type === "data-usage") as { data: { costUsd?: number } }[]
+      const usage = parts.at(-1)?.data
+      return sum + (usage?.costUsd ?? 0)
+    }, 0)
   }, [messages])
 
   // Texto de progreso para la status strip — prioriza tool-status (granular) sobre data-status
@@ -375,9 +384,6 @@ function ChatUI() {
             />
           ))}
         </div>
-        <div style={ss.sidebarFooter}>
-          <ChangelogPill style={{ position: "relative", bottom: "auto", right: "auto", zIndex: "auto" }} align="left" />
-        </div>
       </aside>
 
       {/* ── Área de chat ─────────────────────────────────────────── */}
@@ -396,9 +402,30 @@ function ChatUI() {
             </span>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
-            {/* Token indicator */}
+            {/* Token indicator & Session Cost */}
             {messages.length > 0 && (
-              latestUsage ? (
+              <>
+                {totalSessionCost > 0 && (
+                  <div 
+                    style={{ 
+                      fontSize: 12, 
+                      fontWeight: 600, 
+                      color: "var(--ai4u-text-primary)", 
+                      background: "rgba(34, 197, 94, 0.1)", 
+                      border: "1px solid rgba(34, 197, 94, 0.2)",
+                      padding: "4px 8px", 
+                      borderRadius: 16,
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 4
+                    }}
+                    title="Costo acumulado de esta sesión de chat"
+                  >
+                    <span>💰</span>
+                    <span>${totalSessionCost.toFixed(3)}</span>
+                  </div>
+                )}
+              {latestUsage ? (
                 <span
                   style={{ fontSize: 11, fontFamily: TYPOGRAPHY_TOKENS.fontFamily.code, display: "flex", alignItems: "center", gap: 5 }}
                   title={`Entrada: ${latestUsage.inputTokens.toLocaleString()} tokens | Salida: ${latestUsage.outputTokens.toLocaleString()} tokens${latestUsage.cacheReadTokens > 0 ? ` | Cache hit: ${latestUsage.cacheReadTokens.toLocaleString()} tokens` : ""}`}
@@ -420,7 +447,8 @@ function ChatUI() {
                   title={`~${tokenEstimate.toLocaleString()} tokens estimados`}>
                   ~{tokenEstimate > 1000 ? `${Math.round(tokenEstimate / 1000)}k` : tokenEstimate}t
                 </span>
-              )
+              )}
+              </>
             )}
             {activeThread && messages.length > 0 && (
               <button
@@ -525,6 +553,9 @@ function ChatUI() {
             }} />
             <span style={{ fontSize: 11, color: "var(--ai4u-cadet-gray)", fontWeight: 500 }}>
               Asistente SAP B1 · Inteligencia Integrada ⚡
+            </span>
+            <span style={{ marginLeft: "auto" }}>
+              <ChangelogPill style={{ position: "relative", bottom: "auto", right: "auto", zIndex: "auto" }} align="right" />
             </span>
           </div>
 

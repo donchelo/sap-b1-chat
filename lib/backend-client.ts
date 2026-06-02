@@ -15,7 +15,15 @@ export class BackendClient {
   }
 
   private headers(): HeadersInit {
-    return { "Content-Type": "application/json", "X-API-Key": this.apiKey }
+    const headers: Record<string, string> = { "Content-Type": "application/json" }
+    if (this.apiKey) {
+      headers["X-API-Key"] = this.apiKey
+    }
+    const mcSecret = process.env.MISSION_CONTROL_SECRET
+    if (mcSecret) {
+      headers["x-mc-secret"] = mcSecret
+    }
+    return headers
   }
 
   async get<T>(path: string): Promise<T> {

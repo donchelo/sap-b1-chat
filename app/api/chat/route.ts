@@ -1,4 +1,5 @@
 import { createAnthropic } from "@ai-sdk/anthropic"
+import { supabase } from "@/lib/supabase"
 import {
   streamText, stepCountIs, pruneMessages,
   createUIMessageStream, createUIMessageStreamResponse,
@@ -9,8 +10,9 @@ import { z } from "zod"
 import { timingSafeEqual } from "crypto"
 import type { UIMessage, ModelMessage, UIMessageStreamWriter } from "ai"
 import { getTenantId, getApiKey } from "@/app/lib/session"
+import { calculateCost } from "@/app/lib/pricing"
 
-function resolveAuth(req: Request): { tenantId: string; sapApiKey: string } | null {
+function resolveAuth(req: Request): { tenantId: string; sapApiKey: string; userId?: string } | null {
   const secret = req.headers.get("x-internal-secret")
   const expected = process.env.MC_INTERNAL_SECRET
   if (secret && expected) {
@@ -20,7 +22,8 @@ function resolveAuth(req: Request): { tenantId: string; sapApiKey: string } | nu
       if (a.length === b.length && timingSafeEqual(a, b)) {
         const tenantId = req.headers.get("x-tenant-id")
         const sapApiKey = req.headers.get("x-api-key")
-        if (tenantId && sapApiKey) return { tenantId, sapApiKey }
+        const userId = req.headers.get("x-user-id") || undefined
+        if (tenantId && sapApiKey) return { tenantId, sapApiKey, userId }
       }
     } catch { /* fall through to session */ }
   }
@@ -117,6 +120,7 @@ export async function POST(req: Request) {
   const internal = resolveAuth(req)
   const tenantId = internal?.tenantId ?? await getTenantId()
   const apiKey   = internal?.sapApiKey ?? await getApiKey()
+  const userId   = internal?.userId
   if (!tenantId || !apiKey) {
     return Response.json({ error: "Sesión no válida. Accede desde Mission Control." }, { status: 401 })
   }
@@ -125,6 +129,7 @@ export async function POST(req: Request) {
   if (!body || !Array.isArray(body.messages)) {
     return Response.json({ error: "Body inválido. Se esperaba { messages: [...] }" }, { status: 400 })
   }
+  const sessionId = body.sessionId as string | undefined
 
   let modelMessages: ModelMessage[]
   try {
@@ -197,6 +202,43 @@ export async function POST(req: Request) {
         ],
         messages: allMessages,
         stopWhen: stepCountIs(maxSteps),
+        onFinish: async ({ response, text, toolCalls, toolResults }) => {
+          if (supabase && sessionId && userId) {
+            // Upsert session
+            const title = userText.length > 44 ? userText.slice(0, 43) + "…" : userText || "Nueva conversación"
+            try {
+              await supabase.from("chat_sessions").upsert({
+                id: sessionId,
+                tenant_id: tenantId,
+                user_id: userId,
+                title: title,
+                updated_at: new Date().toISOString()
+              }, { onConflict: "id" })
+            } catch {}
+
+            if (lastUserMsg) {
+              try {
+                await supabase.from("chat_messages").insert({
+                  session_id: sessionId,
+                  role: "user",
+                  content: userContent
+                })
+              } catch {}
+            }
+
+            if (text || (toolCalls && toolCalls.length > 0)) {
+              try {
+                await supabase.from("chat_messages").insert({
+                  session_id: sessionId,
+                  role: "assistant",
+                  content: text,
+                  tool_calls: toolCalls,
+                  tool_results: toolResults
+                })
+              } catch {}
+            }
+          }
+        },
         providerOptions: {
           anthropic: {
             ...(modelCfg.thinking ? { thinking: modelCfg.thinking } : {}),
@@ -1079,6 +1121,48 @@ export async function POST(req: Request) {
 
       for await (const chunk of result.toUIMessageStream({ sendReasoning: true })) {
         writer.write(chunk)
+      }
+      
+      try {
+        const usage = await result.usage
+        if (usage) {
+          // Fallbacks en caso de que la SDK use distintos nombres
+          const promptTokens = (usage as any).promptTokens ?? (usage as any).inputTokens ?? 0
+          const completionTokens = (usage as any).completionTokens ?? (usage as any).outputTokens ?? 0
+          
+          // Anthropic prompt caching savings calculation
+          const cacheReadTokens = (usage as any).providerMetadata?.anthropic?.cacheReadTokens ?? 0
+          const cacheWriteTokens = (usage as any).providerMetadata?.anthropic?.cacheCreationTokens ?? 0
+          
+          // Cost calculation using pricing util
+          const costUsd = calculateCost(selectedModel as any, promptTokens, completionTokens)
+          
+          // Discount for cache read tokens (Anthropic charges 10% for cache hits)
+          const PRICING = { "claude-haiku-4.5": 0.25, "claude-sonnet-4.6": 3.00, "claude-opus-4.8": 15.00 }
+          const baseInputPrice = PRICING[selectedModel] || 3.00
+          const savingsUsd = (cacheReadTokens / 1_000_000) * baseInputPrice * 0.90
+          
+          const finalCostUsd = costUsd - savingsUsd
+          
+          const modelName = selectedModel === "claude-haiku-4.5" ? "Claude Haiku" : 
+                            selectedModel === "claude-sonnet-4.6" ? "Claude Sonnet" : "Claude Opus"
+
+          writer.write({ 
+            type: "data-usage", 
+            data: { 
+              inputTokens: promptTokens, 
+              outputTokens: completionTokens,
+              cacheReadTokens,
+              cacheWriteTokens,
+              modelId: selectedModel,
+              modelName,
+              costUsd: Math.max(0, finalCostUsd),
+              savingsUsd: Math.max(0, savingsUsd)
+            } 
+          } as never)
+        }
+      } catch (err) {
+        console.error("Error enviando usage:", err)
       }
     },
   })

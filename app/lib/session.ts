@@ -14,5 +14,5 @@ export async function getApiKey(): Promise<string | null> {
   const tenantId = await getTenantId()
   if (!tenantId) return null
   const key = tenantId.toUpperCase().replace(/-/g, "_") + "_SAP_API_KEY"
-  return process.env[key] ?? null
+  return process.env[key] ?? "S2S_AUTH"
 }
