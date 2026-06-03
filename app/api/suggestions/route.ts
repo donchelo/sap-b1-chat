@@ -63,7 +63,7 @@ export async function POST(req: Request) {
   const body = await req.json().catch(() => ({}))
 
   const internalSecret = req.headers.get("x-internal-secret")
-  const expected = process.env.MC_INTERNAL_SECRET
+  const expected = process.env.MC_INTERNAL_SECRET || process.env.MISSION_CONTROL_SECRET
   let isInternal = false
   if (internalSecret && expected) {
     try {

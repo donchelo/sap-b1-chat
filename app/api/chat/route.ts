@@ -14,7 +14,7 @@ import { calculateCost } from "@/app/lib/pricing"
 
 function resolveAuth(req: Request): { tenantId: string; sapApiKey: string; userId?: string } | null {
   const secret = req.headers.get("x-internal-secret")
-  const expected = process.env.MC_INTERNAL_SECRET
+  const expected = process.env.MC_INTERNAL_SECRET || process.env.MISSION_CONTROL_SECRET
   if (secret && expected) {
     try {
       const ha = createHash("sha256").update(secret).digest()
