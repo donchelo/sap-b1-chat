@@ -19,9 +19,9 @@ export class BackendClient {
     if (this.apiKey) {
       headers["X-API-Key"] = this.apiKey
     }
-    const mcSecret = process.env.MISSION_CONTROL_SECRET
-    if (mcSecret) {
-      headers["x-mc-secret"] = mcSecret
+    const serviceSecret = process.env.BACKEND_SERVICE_SECRET ?? process.env.MISSION_CONTROL_SECRET
+    if (serviceSecret) {
+      headers["x-mc-secret"] = serviceSecret
     }
     return headers
   }

@@ -7,7 +7,7 @@ import {
   tool,
 } from "ai"
 import { z } from "zod"
-import { timingSafeEqual } from "crypto"
+import { timingSafeEqual, createHash } from "crypto"
 import type { UIMessage, ModelMessage, UIMessageStreamWriter } from "ai"
 import { getTenantId, getApiKey } from "@/app/lib/session"
 import { calculateCost } from "@/app/lib/pricing"
@@ -17,9 +17,9 @@ function resolveAuth(req: Request): { tenantId: string; sapApiKey: string; userI
   const expected = process.env.MC_INTERNAL_SECRET
   if (secret && expected) {
     try {
-      const a = Buffer.from(secret)
-      const b = Buffer.from(expected)
-      if (a.length === b.length && timingSafeEqual(a, b)) {
+      const ha = createHash("sha256").update(secret).digest()
+      const hb = createHash("sha256").update(expected).digest()
+      if (timingSafeEqual(ha, hb)) {
         const tenantId = req.headers.get("x-tenant-id")
         const sapApiKey = req.headers.get("x-api-key")
         const userId = req.headers.get("x-user-id") || undefined
@@ -436,7 +436,8 @@ export async function POST(req: Request) {
             execute: async ({ tipo, texto, top }: { tipo: "cliente" | "proveedor" | "item"; texto: string; top?: number }, { toolCallId }) => {
               writer.write({ type: "data-tool-status", data: { toolCallId, text: `Buscando ${tipo}…` } } as never)
               const limit = Math.min(top ?? 10, 50)
-              const escaped = texto.replace(/'/g, "''")
+              const safeTexto = texto.replace(/[\x00-\x1f\x7f]/g, "").slice(0, 100)
+              const escaped = safeTexto.replace(/'/g, "''")
               try {
                 if (tipo === "item") {
                   const path = `/Items?$select=ItemCode,ItemName,AvgStdPrice,QuantityOnStock&$top=${limit}&$filter=contains(ItemCode,'${escaped}') or contains(ItemName,'${escaped}')`
