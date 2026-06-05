@@ -20,6 +20,13 @@ const FALLBACK: string[] = [
   "¿Cuáles son los 5 productos con mayor crecimiento de demanda en el último trimestre?",
 ]
 
+const MAGDALENA_SUGGESTIONS: string[] = [
+  "¿Cuál es la estrategia de posicionamiento de La Magdalena en el segmento de lujo cultural?",
+  "¿Cómo podemos expandir la narrativa del Libro Jarupia a nuevos coleccionistas internacionales?",
+  "¿Qué oportunidades hay para crecer en el mercado de arte colombiano en el exterior?",
+  "¿Cómo optimizar el flujo de ingresos manteniendo la exclusividad y rareza de las piezas?",
+]
+
 function buildPrompt(today: string, tenantName: string): string {
   return `Eres un consultor estratégico con expertise en SAP Business One.
 
@@ -78,6 +85,11 @@ export async function POST(req: Request) {
 
   if (!apiKey) {
     return Response.json({ error: "Sesión no válida. Accede desde Mission Control." }, { status: 401 })
+  }
+
+  const { getTenantBackend } = await import("@/lib/tenant-backends")
+  if (getTenantBackend(tenantId ?? "").type === "proxy") {
+    return Response.json({ questions: MAGDALENA_SUGGESTIONS, generatedAt: Date.now(), source: "static" })
   }
 
   const { tenantName } = body as { tenantName?: string }

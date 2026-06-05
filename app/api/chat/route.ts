@@ -33,8 +33,41 @@ import { BackendClient } from "@/lib/backend-client"
 import { ENTITY_MAP } from "@/lib/entity-map"
 import { buildStaticSystemPrompt, buildDynamicSystemContext, type CatalogEntry } from "@/lib/chat/system-prompt"
 import { fetchSapContext } from "@/lib/chat/sap-context"
+import { getTenantBackend } from "@/lib/tenant-backends"
 
 export const maxDuration = 300
+
+// ── Proxy handler for non-SAP tenants ───────────────────────────
+async function proxyToBackend(url: string, messages: unknown[], model?: string): Promise<Response> {
+  if (!url) {
+    return Response.json({ error: "Backend no configurado para este tenant." }, { status: 503 })
+  }
+  const secret = process.env.MC_INTERNAL_SECRET || process.env.MISSION_CONTROL_SECRET
+  let upstream: Response
+  try {
+    upstream = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(secret ? { "x-internal-secret": secret } : {}),
+      },
+      body: JSON.stringify({ messages, model }),
+      signal: AbortSignal.timeout(290_000),
+    })
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    return Response.json({ error: `Backend no disponible: ${msg}` }, { status: 502 })
+  }
+  if (!upstream.ok || !upstream.body) {
+    return Response.json({ error: "Error del backend externo." }, { status: upstream.status })
+  }
+  return new Response(upstream.body, {
+    headers: {
+      "Content-Type": upstream.headers.get("Content-Type") ?? "text/event-stream",
+      "X-Accel-Buffering": "no",
+    },
+  })
+}
 
 // ── Error classifier ────────────────────────────────────────────
 type SapError = { code: string; message: string; retryable: boolean }
@@ -129,6 +162,12 @@ export async function POST(req: Request) {
   if (!body || !Array.isArray(body.messages)) {
     return Response.json({ error: "Body inválido. Se esperaba { messages: [...] }" }, { status: 400 })
   }
+
+  const tenantBackend = getTenantBackend(tenantId)
+  if (tenantBackend.type === "proxy") {
+    return proxyToBackend(tenantBackend.proxyUrl ?? "", body.messages, body.model as string | undefined)
+  }
+
   const sessionId = body.sessionId as string | undefined
 
   let modelMessages: ModelMessage[]
@@ -202,7 +241,7 @@ export async function POST(req: Request) {
         ],
         messages: allMessages,
         stopWhen: stepCountIs(maxSteps),
-        onFinish: async ({ response, text, toolCalls, toolResults }) => {
+        onFinish: async ({ text, toolCalls, toolResults }) => {
           if (supabase && sessionId && userId) {
             // Upsert session
             const title = userText.length > 44 ? userText.slice(0, 43) + "…" : userText || "Nueva conversación"

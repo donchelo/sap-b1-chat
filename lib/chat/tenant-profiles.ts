@@ -56,6 +56,19 @@ export const TENANT_PROFILES: Record<TenantId, TenantProfile> = {
       "sistema",
     ],
   },
+  magdalena: {
+    nombre: "La Magdalena",
+    industria: "Arte, memoria visual y biodiversidad de Colombia",
+    pais: "Colombia",
+    moneda: "COP",
+    periodoFiscal: "Enero – Diciembre",
+    lineasNegocio: ["Fotografía editorial", "Libro Jarupia", "Curaduría cultural"],
+    glosario: {
+      jarupia: "libro de biodiversidad y memoria visual de Colombia",
+      pieza: "obra fotográfica o editorial de edición limitada",
+    },
+    modulosActivos: ["advisor", "social-listening", "share-of-voice", "proyeccion"],
+  },
 }
 
 export function getTenantProfile(tenant: TenantId): TenantProfile {
