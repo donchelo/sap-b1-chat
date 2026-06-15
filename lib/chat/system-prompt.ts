@@ -122,7 +122,7 @@ Terminología clave en SAP para esta empresa:
 ${glosario}`
 }
 
-function buildSapContextSection(ctx: SapContext): string {
+export function buildSapContextSection(ctx: SapContext): string {
   const parts: string[] = []
 
   if (ctx.almacenes.length) {
@@ -603,17 +603,20 @@ ORDER BY CardName ASC
 
 ### Ticket promedio por vendedor
 \`\`\`sql
--- ⚠️ Sin aritmética en SELECT (SUM/COUNT no soportado) y sin ORDER BY aggregate
--- Retorna SUM y COUNT por separado; Ticket = TotalVentas / Facturas
-SELECT S.SlpName,
+-- ⚠️ OSLP NO es accesible vía SQL (error 702). Agrupa por SlpCode y cruza nombres vía OData.
+-- ⚠️ Sin aritmética en SELECT (SUM/COUNT no soportado) y sin ORDER BY aggregate.
+-- Paso 1: SQL — totales por código de vendedor
+SELECT SlpCode,
        COUNT(*) AS Facturas,
-       SUM(H.DocTotal) AS TotalVentas
-FROM OINV H
-INNER JOIN OSLP S ON H.SlpCode = S.SlpCode
-WHERE H.DocDate >= '2026-01-01' AND H.DocDate <= '2026-03-31' AND H.CANCELED = 'N'
-GROUP BY S.SlpName
+       SUM(DocTotal) AS TotalVentas
+FROM OINV
+WHERE DocDate >= '2026-01-01' AND DocDate <= '2026-03-31' AND CANCELED = 'N'
+GROUP BY SlpCode
+
+-- Paso 2: OData — nombres de vendedores
+-- Herramienta: listar_registros("sistema/vendedores") → SalesEmployeeCode (= SlpCode), SalesEmployeeName
 \`\`\`
-*TicketPromedio = TotalVentas / Facturas (calculado desde los resultados por fila).*
+*Cruza SlpCode del SQL con SalesEmployeeCode del OData. TicketPromedio = TotalVentas / Facturas (calculado desde los resultados por fila).*
 
 ---
 
@@ -678,10 +681,10 @@ Los CTEs no funcionan en este conector. NUNCA uses la cláusula WITH.
 WITH Totales AS (SELECT DocEntry, SUM(LineTotal) AS Total FROM INV1 GROUP BY DocEntry)
 SELECT H.DocNum, T.Total FROM OINV H INNER JOIN Totales T ON H.DocEntry = T.DocEntry
 
--- ✅ CORRECTO: JOIN directo sin CTE
+-- ✅ CORRECTO: JOIN directo sin CTE (sin ORDER BY por agregado — ordena desde los resultados)
 SELECT H.DocNum, SUM(L.LineTotal) AS Total
 FROM OINV H INNER JOIN INV1 L ON H.DocEntry = L.DocEntry
-GROUP BY H.DocNum, H.DocDate ORDER BY SUM(H.DocTotal) DESC
+GROUP BY H.DocNum
 \`\`\`
 
 ### 3. ORDER BY — SOLO por columnas del GROUP BY (no por agregados)
@@ -751,10 +754,14 @@ SELECT SUM(DocTotal) AS Total FROM OINV
 \`\`\`
 
 ### 8. NULLIF() y COALESCE() — PROHIBIDAS
-Ambas fallan en este conector. Usa CASE WHEN:
+Ambas fallan en este conector. Y recuerda que CASE WHEN y la aritmética en SELECT también están prohibidas (reglas #4 y #6), así que NO los uses como reemplazo.
 \`\`\`sql
--- División segura sin NULLIF/COALESCE:
-CASE WHEN SUM(LineTotal) > 0 THEN (SUM(GrssProfit) / SUM(LineTotal)) * 100 ELSE 0 END
+-- ❌ INCORRECTO — CASE WHEN + aritmética entre agregados (viola #4 y #6)
+SELECT CASE WHEN SUM(LineTotal) > 0 THEN (SUM(GrssProfit) / SUM(LineTotal)) * 100 ELSE 0 END FROM INV1
+
+-- ✅ CORRECTO — trae los agregados por separado y divide desde los resultados
+SELECT SUM(GrssProfit) AS MargenBruto, SUM(LineTotal) AS Ventas FROM INV1
+-- Luego % = MargenBruto / Ventas * 100 (si Ventas = 0, muestra n/a)
 \`\`\`
 
 ### 9. ADD_DAYS() y ADD_MONTHS() — NO SOPORTADAS
@@ -836,11 +843,11 @@ SELECT * FROM OINV WHERE DocDate >= '2026-02-28'
 }
 
 /**
- * Parte dinámica del system prompt — fecha actual + datos maestros SAP en
- * tiempo real (almacenes, vendedores, etc.). Se envía sin cache_control porque
- * cambia con cada request (la fecha) o con los datos de SAP (los maestros).
+ * Fecha actual — lo único verdaderamente volátil del prompt (cambia cada día).
+ * Va en un bloque system SIN cache_control para no invalidar el cache del bloque
+ * estático + maestros, que sí es cacheable.
  */
-export function buildDynamicSystemContext(tenant: TenantId, sapCtx?: SapContext): string {
+export function buildFechaActual(): string {
   const fecha = new Date().toLocaleDateString("es-CO", {
     weekday: "long",
     year: "numeric",
@@ -848,11 +855,16 @@ export function buildDynamicSystemContext(tenant: TenantId, sapCtx?: SapContext)
     day: "numeric",
     timeZone: "America/Bogota",
   })
+  return `Fecha actual: ${fecha}.`
+}
 
+/**
+ * @deprecated Usa buildStaticSystemPrompt + buildSapContextSection (cacheado) y
+ * buildFechaActual (sin cache) por separado. Se mantiene por compatibilidad.
+ */
+export function buildDynamicSystemContext(_tenant: TenantId, sapCtx?: SapContext): string {
   const maestrosSection = sapCtx ? buildSapContextSection(sapCtx) : ""
-
-  const parts: string[] = [`Fecha actual: ${fecha}.`]
+  const parts: string[] = [buildFechaActual()]
   if (maestrosSection) parts.push(maestrosSection)
-
   return parts.join("\n\n")
 }

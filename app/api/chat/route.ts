@@ -10,7 +10,7 @@ import { z } from "zod"
 import { timingSafeEqual, createHash } from "crypto"
 import type { UIMessage, ModelMessage, UIMessageStreamWriter } from "ai"
 import { getTenantId, getApiKey } from "@/app/lib/session"
-import { calculateCost } from "@/app/lib/pricing"
+import { resolveModelConfig, calculateCostWithCacheForModel } from "@/lib/chat/models"
 
 function resolveAuth(req: Request): { tenantId: string; sapApiKey: string; userId?: string } | null {
   const secret = req.headers.get("x-internal-secret")
@@ -31,7 +31,7 @@ function resolveAuth(req: Request): { tenantId: string; sapApiKey: string; userI
 }
 import { BackendClient } from "@/lib/backend-client"
 import { ENTITY_MAP } from "@/lib/entity-map"
-import { buildStaticSystemPrompt, buildDynamicSystemContext, type CatalogEntry } from "@/lib/chat/system-prompt"
+import { buildStaticSystemPrompt, buildSapContextSection, buildFechaActual, type CatalogEntry } from "@/lib/chat/system-prompt"
 import { fetchSapContext } from "@/lib/chat/sap-context"
 import { getTenantBackend } from "@/lib/tenant-backends"
 
@@ -81,25 +81,6 @@ function classifySapError(err: unknown): { error: SapError } {
   if (msg.includes("404"))
     return { error: { code: "SAP_NOT_FOUND", message: msg, retryable: false } }
   return { error: { code: "SAP_ERROR", message: msg, retryable: false } }
-}
-
-// ── Model selection ──────────────────────────────────────────────
-const ALLOWED_MODELS = ["claude-haiku-4.5", "claude-sonnet-4.6", "claude-opus-4.8"] as const
-type AllowedModel = (typeof ALLOWED_MODELS)[number]
-const DEFAULT_MODEL: AllowedModel = "claude-sonnet-4.6"
-
-type ThinkingConfig = { type: "adaptive"; display?: "summarized" | "omitted" }
-type EffortLevel = "low" | "medium" | "high" | "xhigh" | "max"
-type ModelConfig = { thinking?: ThinkingConfig; effort?: EffortLevel }
-
-const MODEL_CONFIGS: Record<AllowedModel, ModelConfig> = {
-  "claude-haiku-4.5":  {},
-  "claude-sonnet-4.6": { thinking: { type: "adaptive" }, effort: "medium" },
-  "claude-opus-4.8":   { thinking: { type: "adaptive", display: "summarized" }, effort: "high" },
-}
-
-function toApiSlug(model: AllowedModel): string {
-  return model.replace(/(\d)\.(\d)/g, "$1-$2")
 }
 
 // ── OData URL builders ───────────────────────────────────────────
@@ -190,11 +171,12 @@ export async function POST(req: Request) {
   const userTextNorm = userText.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "")
   const isComplexQuery = complexReportKeywords.some((kw) => userTextNorm.includes(kw))
 
+  // Resolución segura de modelo + effort + thinking (clampea al set válido del
+  // modelo, nunca produce un 400). El cliente puede pedir cualquier modelo/effort.
   const requestedModel = typeof body.model === "string" ? body.model : ""
-  const selectedModel: AllowedModel = ALLOWED_MODELS.includes(requestedModel as AllowedModel)
-    ? (requestedModel as AllowedModel)
-    : DEFAULT_MODEL
-  const modelCfg = MODEL_CONFIGS[selectedModel]
+  const requestedEffort = typeof body.effort === "string" ? body.effort : undefined
+  const { model: modelCap, effort, thinking } = resolveModelConfig(requestedModel, requestedEffort)
+  const selectedModel = modelCap.id
   const maxSteps = isComplexQuery ? 20 : 12
 
   // Message pruning (no sessions — historial viene del cliente)
@@ -233,13 +215,28 @@ export async function POST(req: Request) {
         (q) => ({ name: q.name, description: q.description })
       )
 
+      // ── System prompt cacheable ──────────────────────────────────
+      // Bloque estático + datos maestros SAP: idéntico entre requests del
+      // mismo tenant → cache_control ephemeral (1h). El breakpoint va al final
+      // de este bloque, por lo que Anthropic cachea tools + system completos.
+      // La fecha (única parte volátil) va en un bloque APARTE sin cache.
+      const maestros = buildSapContextSection(sapCtx)
+      const staticBlock = maestros
+        ? `${buildStaticSystemPrompt(tenantId, catalogEntries)}\n\n${maestros}`
+        : buildStaticSystemPrompt(tenantId, catalogEntries)
+
+      const systemMessages: ModelMessage[] = [
+        {
+          role: "system",
+          content: staticBlock,
+          providerOptions: { anthropic: { cacheControl: { type: "ephemeral", ttl: "1h" } } },
+        },
+        { role: "system", content: buildFechaActual() },
+      ]
+
       const result = streamText({
-        model: anthropic(toApiSlug(selectedModel)),
-        system: [
-          { role: "system" as const, content: buildStaticSystemPrompt(tenantId, catalogEntries) },
-          { role: "system" as const, content: buildDynamicSystemContext(tenantId, sapCtx) },
-        ],
-        messages: allMessages,
+        model: anthropic(modelCap.apiSlug),
+        messages: [...systemMessages, ...allMessages],
         stopWhen: stepCountIs(maxSteps),
         onFinish: async ({ text, toolCalls, toolResults }) => {
           if (supabase && sessionId && userId) {
@@ -278,11 +275,12 @@ export async function POST(req: Request) {
             }
           }
         },
+        // cacheControl NO va aquí (global) — se marca por-mensaje en systemMessages.
+        // thinking/effort vienen ya resueltos y clampeados por resolveModelConfig.
         providerOptions: {
           anthropic: {
-            ...(modelCfg.thinking ? { thinking: modelCfg.thinking } : {}),
-            ...(modelCfg.effort ? { effort: modelCfg.effort } : {}),
-            cacheControl: { type: "ephemeral" },
+            ...(thinking ? { thinking } : {}),
+            ...(effort ? { effort } : {}),
           },
         },
         tools: {
@@ -1166,39 +1164,38 @@ export async function POST(req: Request) {
       try {
         const usage = await result.usage
         if (usage) {
-          // Fallbacks en caso de que la SDK use distintos nombres
-          const promptTokens = (usage as any).promptTokens ?? (usage as any).inputTokens ?? 0
-          const completionTokens = (usage as any).completionTokens ?? (usage as any).outputTokens ?? 0
-          
-          // Anthropic prompt caching savings calculation
-          const cacheReadTokens = (usage as any).providerMetadata?.anthropic?.cacheReadTokens ?? 0
-          const cacheWriteTokens = (usage as any).providerMetadata?.anthropic?.cacheCreationTokens ?? 0
-          
-          // Cost calculation using pricing util
-          const costUsd = calculateCost(selectedModel as any, promptTokens, completionTokens)
-          
-          // Discount for cache read tokens (Anthropic charges 10% for cache hits)
-          const PRICING = { "claude-haiku-4.5": 0.25, "claude-sonnet-4.6": 3.00, "claude-opus-4.8": 15.00 }
-          const baseInputPrice = PRICING[selectedModel] || 3.00
-          const savingsUsd = (cacheReadTokens / 1_000_000) * baseInputPrice * 0.90
-          
-          const finalCostUsd = costUsd - savingsUsd
-          
-          const modelName = selectedModel === "claude-haiku-4.5" ? "Claude Haiku" : 
-                            selectedModel === "claude-sonnet-4.6" ? "Claude Sonnet" : "Claude Opus"
+          // AI SDK v6: usage.inputTokens es el TOTAL (incluye cacheados).
+          // El desglose real está en inputTokenDetails.
+          const details = usage.inputTokenDetails
+          const totalInput = usage.inputTokens ?? 0
+          const cacheReadTokens = details?.cacheReadTokens ?? 0
+          const cacheWriteTokens = details?.cacheWriteTokens ?? 0
+          // noCache = total − cacheReads − cacheWrites (fallback al total si no hay detalle)
+          const noCacheTokens = details?.noCacheTokens ?? Math.max(0, totalInput - cacheReadTokens - cacheWriteTokens)
+          const completionTokens = usage.outputTokens ?? 0
 
-          writer.write({ 
-            type: "data-usage", 
-            data: { 
-              inputTokens: promptTokens, 
+          // Costo real con tarifas de caching (write 1.25×, read 0.10×), pricing del registro
+          const { costUsd, savingsUsd } = calculateCostWithCacheForModel(modelCap, {
+            noCacheTokens,
+            cacheReadTokens,
+            cacheWriteTokens,
+            outputTokens: completionTokens,
+          })
+
+          const modelName = modelCap.name
+
+          writer.write({
+            type: "data-usage",
+            data: {
+              inputTokens: totalInput,
               outputTokens: completionTokens,
               cacheReadTokens,
               cacheWriteTokens,
               modelId: selectedModel,
               modelName,
-              costUsd: Math.max(0, finalCostUsd),
+              costUsd: Math.max(0, costUsd),
               savingsUsd: Math.max(0, savingsUsd)
-            } 
+            }
           } as never)
         }
       } catch (err) {

@@ -17,6 +17,14 @@ import { MarkdownContent } from "./components/MarkdownContent"
 import { useThreads, type Thread } from "./hooks/useThreads"
 import { useSuggestions } from "./hooks/useSuggestions"
 import { ChangelogPill } from "@/components/ChangelogPill"
+import {
+  MODEL_LIST,
+  DEFAULT_MODEL_ID,
+  getModel,
+  resolveEffort,
+  EFFORT_LABELS,
+  type EffortLevel,
+} from "@/lib/chat/models"
 
 
 const BACKEND_URL =
@@ -31,14 +39,8 @@ const TOOL_LABELS: Record<string, string> = {
   ejecutar_accion:     "Ejecutando acción",
 }
 
-type ModelId = "claude-haiku-4.5" | "claude-sonnet-4.6" | "claude-opus-4.8"
-const DEFAULT_MODEL: ModelId = "claude-sonnet-4.6"
-
-const MODEL_OPTIONS: Array<{ id: ModelId; label: string; description: string; ctxK: number }> = [
-  { id: "claude-haiku-4.5",  label: "Rápido",         description: "Claude Haiku 4.5 — consultas simples y rápidas, menor costo",                ctxK: 200  },
-  { id: "claude-sonnet-4.6", label: "Balanceado",      description: "Claude Sonnet 4.6 — ideal para la mayoría de consultas SAP (predeterminado)", ctxK: 1000 },
-  { id: "claude-opus-4.8",   label: "Máxima IA ⚡",    description: "Claude Opus 4.8 — análisis complejos y razonamiento profundo. Más costoso.",   ctxK: 1000 },
-]
+// Modelos y effort vienen del registro único (lib/chat/models.ts).
+type ModelId = string
 
 // Context limit: Claude Sonnet 200k tokens. Alert zones:
 const CTX_WARN  = 120_000
@@ -142,7 +144,16 @@ function ChatUI() {
   const [inputValue, setInputValue] = useState("")
   const [search, setSearch] = useState("")
   const [sidebarOpen, setSidebarOpen] = useState(false)
-  const [selectedModel, setSelectedModel] = useState<ModelId>(DEFAULT_MODEL)
+  const [selectedModel, setSelectedModel] = useState<ModelId>(DEFAULT_MODEL_ID)
+  const [effort, setEffort] = useState<EffortLevel | undefined>(
+    () => resolveEffort(getModel(DEFAULT_MODEL_ID), undefined)
+  )
+  const modelCap = getModel(selectedModel)
+  // Al cambiar de modelo, resetea el effort al default válido del nuevo modelo.
+  function changeModel(id: string) {
+    setSelectedModel(id)
+    setEffort(resolveEffort(getModel(id), undefined))
+  }
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
@@ -163,8 +174,8 @@ function ChatUI() {
   } = useThreads()
 
   const transport = useMemo(
-    () => new DefaultChatTransport({ api: "/api/chat", body: { model: selectedModel, sessionId: activeThreadId } }),
-    [selectedModel, activeThreadId],
+    () => new DefaultChatTransport({ api: "/api/chat", body: { model: selectedModel, effort, sessionId: activeThreadId } }),
+    [selectedModel, effort, activeThreadId],
   )
 
   const { messages, sendMessage, status, stop, setMessages, regenerate, error, clearError } =
@@ -557,6 +568,52 @@ function ChatUI() {
             <span style={{ marginLeft: "auto" }}>
               <ChangelogPill style={{ position: "relative", bottom: "auto", right: "auto", zIndex: "auto" }} align="right" />
             </span>
+          </div>
+
+          {/* Selector de modelo + effort */}
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
+            <select
+              value={selectedModel}
+              onChange={(e) => changeModel(e.target.value)}
+              disabled={isLoading}
+              title={modelCap.description}
+              style={ss.modelSelect}
+            >
+              {MODEL_LIST.map((m) => (
+                <option key={m.id} value={m.id}>{m.label} · {m.name}</option>
+              ))}
+            </select>
+
+            {modelCap.efforts.length > 0 ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                <span style={{ fontSize: 11, color: "var(--ai4u-cadet-gray)" }}>Esfuerzo</span>
+                <div style={ss.effortGroup}>
+                  {modelCap.efforts.map((lvl) => {
+                    const active = lvl === effort
+                    return (
+                      <button
+                        key={lvl}
+                        type="button"
+                        onClick={() => setEffort(lvl)}
+                        disabled={isLoading}
+                        title={`Esfuerzo de razonamiento: ${EFFORT_LABELS[lvl]}`}
+                        style={{
+                          ...ss.effortBtn,
+                          ...(active ? ss.effortBtnActive : {}),
+                          cursor: isLoading ? "default" : "pointer",
+                        }}
+                      >
+                        {EFFORT_LABELS[lvl]}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            ) : (
+              <span style={{ fontSize: 11, color: "var(--ai4u-cadet-gray)", opacity: 0.7 }}>
+                Respuesta rápida (sin razonamiento extendido)
+              </span>
+            )}
           </div>
 
           {/* Adjuntos pendientes */}
@@ -1048,6 +1105,12 @@ function ThreadItem({
 
 // ─── Estilos ───────────────────────────────────────────────────────────────────
 const ss: Record<string, React.CSSProperties> = {
+  // Selector de modelo + effort
+  modelSelect: { background: "var(--ai4u-bg-default)", color: "var(--ai4u-text-primary)", border: "1px solid var(--ai4u-border-color)", borderRadius: 8, padding: "5px 8px", fontSize: 12, fontFamily: "inherit", cursor: "pointer", outline: "none", maxWidth: 280 },
+  effortGroup: { display: "flex", border: "1px solid var(--ai4u-border-color)", borderRadius: 8, overflow: "hidden" },
+  effortBtn: { background: "transparent", color: "var(--ai4u-text-secondary)", border: "none", padding: "5px 9px", fontSize: 11, fontFamily: "inherit", lineHeight: 1 },
+  effortBtnActive: { background: "var(--ai4u-black)", color: "var(--ai4u-white)" },
+
   lockScreen: { display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100dvh", background: "var(--ai4u-bg-default)", gap: 16, textAlign: "center", padding: 24 },
 
   // Sidebar

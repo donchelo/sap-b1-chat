@@ -20,7 +20,7 @@ export const TENANT_PROFILES: Record<TenantId, TenantProfile> = {
     periodoFiscal: "Enero – Diciembre",
     lineasNegocio: ["Offset", "Digital", "Gran formato", "Acabados"],
     glosario: {
-      tecnología: "familia de artículos / grupo de ítem (OITB.ItmsGrpNam)",
+      tecnología: "familia de artículos / grupo de ítem (OITM.ItmsGrpCod; nombres vía datos maestros del contexto SAP)",
       tiraje: "cantidad de impresiones por trabajo",
     },
     modulosActivos: [
