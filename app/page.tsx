@@ -23,6 +23,7 @@ import {
   getModel,
   resolveEffort,
   EFFORT_LABELS,
+  EFFORT_HINTS,
   type EffortLevel,
 } from "@/lib/chat/models"
 
@@ -585,33 +586,43 @@ function ChatUI() {
             </select>
 
             {modelCap.efforts.length > 0 ? (
-              <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                <span style={{ fontSize: 11, color: "var(--ai4u-cadet-gray)" }}>Esfuerzo</span>
-                <div style={ss.effortGroup}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 11, color: "var(--ai4u-cadet-gray)", fontWeight: 500 }}>
+                  Profundidad
+                </span>
+                <div style={ss.effortGroup} role="radiogroup" aria-label="Profundidad de análisis">
                   {modelCap.efforts.map((lvl) => {
                     const active = lvl === effort
                     return (
                       <button
                         key={lvl}
                         type="button"
+                        role="radio"
+                        aria-checked={active}
                         onClick={() => setEffort(lvl)}
                         disabled={isLoading}
-                        title={`Esfuerzo de razonamiento: ${EFFORT_LABELS[lvl]}`}
+                        title={`${EFFORT_LABELS[lvl]} — ${EFFORT_HINTS[lvl]}`}
                         style={{
                           ...ss.effortBtn,
                           ...(active ? ss.effortBtnActive : {}),
                           cursor: isLoading ? "default" : "pointer",
                         }}
                       >
+                        {active && <span style={{ marginRight: 4 }}>✓</span>}
                         {EFFORT_LABELS[lvl]}
                       </button>
                     )
                   })}
                 </div>
+                {effort && (
+                  <span style={{ fontSize: 11, color: "var(--ai4u-text-secondary)" }}>
+                    {EFFORT_HINTS[effort]}
+                  </span>
+                )}
               </div>
             ) : (
-              <span style={{ fontSize: 11, color: "var(--ai4u-cadet-gray)", opacity: 0.7 }}>
-                Respuesta rápida (sin razonamiento extendido)
+              <span style={{ fontSize: 11, color: "var(--ai4u-cadet-gray)", opacity: 0.8 }}>
+                ⚡ Modelo rápido · sin ajuste de profundidad
               </span>
             )}
           </div>
@@ -1107,9 +1118,10 @@ function ThreadItem({
 const ss: Record<string, React.CSSProperties> = {
   // Selector de modelo + effort
   modelSelect: { background: "var(--ai4u-bg-default)", color: "var(--ai4u-text-primary)", border: "1px solid var(--ai4u-border-color)", borderRadius: 8, padding: "5px 8px", fontSize: 12, fontFamily: "inherit", cursor: "pointer", outline: "none", maxWidth: 280 },
-  effortGroup: { display: "flex", border: "1px solid var(--ai4u-border-color)", borderRadius: 8, overflow: "hidden" },
-  effortBtn: { background: "transparent", color: "var(--ai4u-text-secondary)", border: "none", padding: "5px 9px", fontSize: 11, fontFamily: "inherit", lineHeight: 1 },
-  effortBtnActive: { background: "var(--ai4u-black)", color: "var(--ai4u-white)" },
+  // Track estilo segmented control: fondo gris claro, pastilla activa rellena.
+  effortGroup: { display: "inline-flex", gap: 2, padding: 2, background: "var(--ai4u-bg-surface, #f1f1f1)", border: "1px solid var(--ai4u-border-color)", borderRadius: 9 },
+  effortBtn: { background: "transparent", color: "var(--ai4u-cadet-gray)", border: "none", padding: "5px 11px", fontSize: 11, fontWeight: 500, fontFamily: "inherit", lineHeight: 1.1, borderRadius: 7, transition: "background 0.12s, color 0.12s", display: "inline-flex", alignItems: "center" },
+  effortBtnActive: { background: "var(--ai4u-black, #111)", color: "var(--ai4u-white, #fff)", fontWeight: 700, boxShadow: "0 1px 3px rgba(0,0,0,0.25)" },
 
   lockScreen: { display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100dvh", background: "var(--ai4u-bg-default)", gap: 16, textAlign: "center", padding: 24 },
 

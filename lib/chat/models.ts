@@ -84,11 +84,20 @@ export function getModel(id: string | undefined): ModelCapability {
 
 /** Labels cortos para el selector de effort en la UI. */
 export const EFFORT_LABELS: Record<EffortLevel, string> = {
-  low: "Bajo",
-  medium: "Medio",
-  high: "Alto",
-  xhigh: "Muy alto",
-  max: "Máximo",
+  low: "Ágil",
+  medium: "Media",
+  high: "Alta",
+  xhigh: "Muy alta",
+  max: "Máxima",
+}
+
+/** Pista del trade-off de cada nivel (leyenda dinámica). */
+export const EFFORT_HINTS: Record<EffortLevel, string> = {
+  low: "rápida y económica",
+  medium: "equilibrio velocidad/profundidad",
+  high: "análisis riguroso · más lento y costoso",
+  xhigh: "muy riguroso · tareas complejas",
+  max: "máxima profundidad · sin límite de razonamiento",
 }
 
 // ── Resolución segura de configuración del provider ──────────────────────────
