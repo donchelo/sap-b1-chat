@@ -174,9 +174,21 @@ function ChatUI() {
     renameThread,
   } = useThreads()
 
+  // Refs con la selección actual: transport estable que lee estos refs en cada
+  // request (useChat no re-lee un transport recreado → antes mandaba el modelo
+  // default sin importar lo seleccionado).
+  const modelRef = useRef(selectedModel)
+  modelRef.current = selectedModel
+  const effortRef = useRef(effort)
+  effortRef.current = effort
+  const threadRef = useRef(activeThreadId)
+  threadRef.current = activeThreadId
   const transport = useMemo(
-    () => new DefaultChatTransport({ api: "/api/chat", body: { model: selectedModel, effort, sessionId: activeThreadId } }),
-    [selectedModel, effort, activeThreadId],
+    () => new DefaultChatTransport({
+      api: "/api/chat",
+      body: () => ({ model: modelRef.current, effort: effortRef.current, sessionId: threadRef.current }),
+    }),
+    [],
   )
 
   const { messages, sendMessage, status, stop, setMessages, regenerate, error, clearError } =
