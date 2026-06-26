@@ -21,7 +21,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Token inválido o expirado" }, { status: 401 })
   }
 
-  const sessionToken = createSession(data.tenantId, secret, SESSION_TTL_MS)
+  // Propaga identidad+permisos embebidos por el handoff de MC a la sesión local.
+  const sessionToken = createSession(data.tenantId, secret, SESSION_TTL_MS, {
+    userId: data.userId,
+    roles: data.roles,
+    allowedModules: data.allowedModules,
+    displayName: data.displayName,
+  })
   // 303 so the browser follows the redirect as GET (not re-POSTing to "/").
   const res = NextResponse.redirect(new URL("/", req.url), 303)
   res.cookies.set(COOKIE, sessionToken, {
