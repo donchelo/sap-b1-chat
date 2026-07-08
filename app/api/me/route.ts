@@ -1,3 +1,4 @@
+import { withApiHandler } from "@ai4u/platform/http"
 import { getApiKey, getTenantId } from "@/app/lib/session"
 
 const BACKEND_URL =
@@ -5,7 +6,7 @@ const BACKEND_URL =
   process.env.NEXT_PUBLIC_BACKEND_URL ??
   "http://localhost:4100"
 
-export async function GET() {
+export const GET = withApiHandler(async () => {
   const [apiKey, tenantId] = await Promise.all([getApiKey(), getTenantId()])
 
   if (!apiKey || !tenantId) {
@@ -25,4 +26,4 @@ export async function GET() {
 
   // Fallback: return tenantId from session
   return Response.json({ tenant: tenantId, name: tenantId })
-}
+}, { label: "GET me" }) as () => Promise<Response>
