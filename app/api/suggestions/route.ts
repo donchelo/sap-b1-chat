@@ -18,17 +18,17 @@ import { getApiKey, getTenantId } from "@/app/lib/session"
 export const maxDuration = 30
 
 const FALLBACK: string[] = [
-  "¿Cuál es el margen bruto por línea de producto este mes vs. el mes anterior?",
-  "¿Qué clientes no han comprado en los últimos 60 días y tienen historial alto?",
-  "¿Qué materiales están por debajo del stock mínimo esta semana?",
-  "¿Cuáles son los 5 productos con mayor crecimiento de demanda en el último trimestre?",
+  "¿Cómo van las ventas de este mes?",
+  "¿Qué clientes me deben más?",
+  "¿Qué productos dejan más margen?",
+  "¿Qué materiales están por agotarse?",
 ]
 
 const MAGDALENA_SUGGESTIONS: string[] = [
-  "¿Cuál es la estrategia de posicionamiento de La Magdalena en el segmento de lujo cultural?",
-  "¿Cómo podemos expandir la narrativa del Libro Jarupia a nuevos coleccionistas internacionales?",
-  "¿Qué oportunidades hay para crecer en el mercado de arte colombiano en el exterior?",
-  "¿Cómo optimizar el flujo de ingresos manteniendo la exclusividad y rareza de las piezas?",
+  "¿Cómo van los ingresos este año?",
+  "¿Cómo atraemos nuevos coleccionistas?",
+  "¿Cómo crecemos sin perder exclusividad?",
+  "¿Qué mercados deberíamos explorar?",
 ]
 
 function buildPrompt(today: string, tenantId: string, tenantNameFallback: string): string {
@@ -48,19 +48,21 @@ function buildPrompt(today: string, tenantId: string, tenantNameFallback: string
 
 ${contexto}
 
-Genera 4 preguntas estratégicas de alto valor que el dueño debería hacerle hoy (${today}) al sistema SAP B1.
+Genera 4 preguntas cortas y fundamentales que el dueño debería hacerle hoy (${today}) al sistema SAP B1.
 
 Cubre exactamente estas categorías, una por pregunta:
-1. FINANZAS: márgenes, rentabilidad, flujo de caja, cuentas por cobrar/pagar
-2. CLIENTES Y VENTAS: concentración, crecimiento, ticket promedio, frecuencia de compra
-3. OPERACIONES: inventario, materiales, producción, tiempos, eficiencia
-4. ESTRATEGIA: tendencias, comparativas con periodo anterior, oportunidades de mejora
+1. FINANZAS
+2. CLIENTES Y VENTAS
+3. OPERACIONES
+4. ESTRATEGIA
 
 Criterios:
-- Cada pregunta debe ser respondible con datos reales de SAP B1.
-- Específicas para el giro de la empresa (no genéricas).
-- Accionables para tomar decisiones esta semana.
-- Varía el horizonte temporal entre preguntas (hoy, semana, mes, trimestre).`
+- Máximo 10 palabras por pregunta. Directas, sin rodeos.
+- Fundamentales: lo primero que un dueño quiere saber de su negocio.
+- Lenguaje simple, sin jerga técnica ni condiciones compuestas.
+- Respondibles con datos reales de SAP B1.
+
+Ejemplos del estilo esperado: "¿Cómo van las ventas de este mes?", "¿Qué clientes me deben más?", "¿Qué productos dejan más margen?".`
 }
 
 export const POST = withApiHandler(async (req: Request) => {
