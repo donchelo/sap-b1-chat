@@ -1,4 +1,5 @@
 import { createAnthropic } from "@ai-sdk/anthropic"
+import { withApiHandler } from "@ai4u/platform/http"
 import { supabase } from "@/lib/supabase"
 import {
   streamText, stepCountIs, pruneMessages,
@@ -130,7 +131,7 @@ const CORE_TABLES = [
 ]
 
 // ── Handler principal ────────────────────────────────────────────
-export async function POST(req: Request) {
+export const POST = withApiHandler(async (req: Request) => {
   const internal = resolveAuth(req)
   const tenantId = internal?.tenantId ?? await getTenantId()
   const apiKey   = internal?.sapApiKey ?? await getApiKey()
@@ -1205,4 +1206,4 @@ export async function POST(req: Request) {
   })
 
   return createUIMessageStreamResponse({ stream })
-}
+}, { label: "POST chat" }) as (req: Request) => Promise<Response>

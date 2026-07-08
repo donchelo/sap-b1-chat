@@ -1,5 +1,6 @@
-import { NextRequest, NextResponse } from "next/server"
+import { NextResponse, type NextRequest } from "next/server"
 import { verifyMcToken, createSession } from "@ai4u/mc-sso"
+import { withApiHandler } from "@ai4u/platform/http"
 import { COOKIE } from "@/app/lib/session"
 
 const SERVICE_ID     = "sapb1chat"
@@ -8,7 +9,8 @@ const SESSION_TTL_MS = SESSION_TTL_S * 1000
 
 // POST binding: the SSO token arrives in the form body (never the URL), sent by
 // Mission Control's /api/handoff auto-submitting form.
-export async function POST(req: NextRequest) {
+export const POST = withApiHandler(async (rawReq) => {
+  const req = rawReq as NextRequest
   const form   = await req.formData()
   const token  = String(form.get("token") ?? "")
   const secret = process.env.MISSION_CONTROL_SECRET
@@ -38,4 +40,4 @@ export async function POST(req: NextRequest) {
     path:     "/",
   })
   return res
-}
+}, { label: "POST mc-auth" }) as (req: NextRequest) => Promise<Response>

@@ -1,5 +1,6 @@
 import { timingSafeEqual } from "crypto"
 import { createAnthropic } from "@ai-sdk/anthropic"
+import { withApiHandler } from "@ai4u/platform/http"
 import { generateText, Output } from "ai"
 import { z } from "zod"
 import { getTenantProfile } from "@/lib/chat/tenant-profiles"
@@ -62,7 +63,7 @@ Criterios:
 - Varía el horizonte temporal entre preguntas (hoy, semana, mes, trimestre).`
 }
 
-export async function POST(req: Request) {
+export const POST = withApiHandler(async (req: Request) => {
   const body = await req.json().catch(() => ({}))
 
   // Auth: x-internal-secret de Mission Control, o sesión directa
@@ -129,4 +130,4 @@ export async function POST(req: Request) {
   } catch {
     return Response.json({ questions: FALLBACK, generatedAt: Date.now(), source: "fallback" })
   }
-}
+}, { label: "POST suggestions" }) as (req: Request) => Promise<Response>

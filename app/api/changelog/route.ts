@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server"
+import { withApiHandler } from "@ai4u/platform/http"
 
 const CHANGELOG_URL = process.env.CHANGELOG_URL
 
-export async function GET(req: Request) {
+export const GET = withApiHandler(async (req: Request) => {
   if (!CHANGELOG_URL) {
     return NextResponse.json({ error: "changelog not configured" }, { status: 503 })
   }
@@ -20,4 +21,4 @@ export async function GET(req: Request) {
 
   const data = await res.json()
   return NextResponse.json(data)
-}
+}, { label: "GET changelog" }) as (req: Request) => Promise<Response>
