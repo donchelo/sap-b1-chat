@@ -8,25 +8,18 @@ import {
   tool,
 } from "ai"
 import { z } from "zod"
-import { timingSafeEqual, createHash } from "crypto"
 import type { UIMessage, ModelMessage, UIMessageStreamWriter } from "ai"
 import { getTenantId, getApiKey } from "@/app/lib/session"
 import { resolveModelConfig, calculateCostWithCacheForModel } from "@/lib/chat/models"
+import { verifyInternalSecret, getOutgoingInternalSecret } from "@/lib/internal-auth"
 
 function resolveAuth(req: Request): { tenantId: string; sapApiKey: string; userId?: string } | null {
   const secret = req.headers.get("x-internal-secret")
-  const expected = process.env.MC_INTERNAL_SECRET || process.env.MISSION_CONTROL_SECRET
-  if (secret && expected) {
-    try {
-      const ha = createHash("sha256").update(secret).digest()
-      const hb = createHash("sha256").update(expected).digest()
-      if (timingSafeEqual(ha, hb)) {
-        const tenantId = req.headers.get("x-tenant-id")
-        const sapApiKey = req.headers.get("x-api-key")
-        const userId = req.headers.get("x-user-id") || undefined
-        if (tenantId && sapApiKey) return { tenantId, sapApiKey, userId }
-      }
-    } catch { /* fall through to session */ }
+  if (verifyInternalSecret(secret)) {
+    const tenantId = req.headers.get("x-tenant-id")
+    const sapApiKey = req.headers.get("x-api-key")
+    const userId = req.headers.get("x-user-id") || undefined
+    if (tenantId && sapApiKey) return { tenantId, sapApiKey, userId }
   }
   return null
 }
@@ -43,7 +36,7 @@ async function proxyToBackend(url: string, messages: unknown[], model?: string):
   if (!url) {
     return Response.json({ error: "Backend no configurado para este tenant." }, { status: 503 })
   }
-  const secret = process.env.MC_INTERNAL_SECRET || process.env.MISSION_CONTROL_SECRET
+  const secret = getOutgoingInternalSecret()
   let upstream: Response
   try {
     upstream = await fetch(url, {
