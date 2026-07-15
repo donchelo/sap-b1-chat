@@ -1,4 +1,3 @@
-import { timingSafeEqual } from "crypto"
 import { createAnthropic } from "@ai-sdk/anthropic"
 import { withApiHandler } from "@ai4u/platform/http"
 import { generateText, Output } from "ai"
@@ -6,6 +5,7 @@ import { z } from "zod"
 import { getTenantProfile } from "@/lib/chat/tenant-profiles"
 import { getTenantBackend } from "@/lib/tenant-backends"
 import { getApiKey, getTenantId } from "@/app/lib/session"
+import { verifyInternalSecret } from "@/lib/internal-auth"
 
 // ─── /api/suggestions ────────────────────────────────────────────────────────
 // Genera 4 preguntas estratégicas de negocio para el tenant activo mediante una
@@ -70,15 +70,7 @@ export const POST = withApiHandler(async (req: Request) => {
 
   // Auth: x-internal-secret de Mission Control, o sesión directa
   const internalSecret = req.headers.get("x-internal-secret")
-  const expected = process.env.MC_INTERNAL_SECRET || process.env.MISSION_CONTROL_SECRET
-  let isInternal = false
-  if (internalSecret && expected) {
-    try {
-      const a = Buffer.from(internalSecret)
-      const b = Buffer.from(expected)
-      isInternal = a.length === b.length && timingSafeEqual(a, b)
-    } catch { /* fall through */ }
-  }
+  const isInternal = verifyInternalSecret(internalSecret)
 
   const apiKey   = isInternal ? req.headers.get("x-api-key")   : await getApiKey()
   const tenantId = isInternal ? req.headers.get("x-tenant-id") : await getTenantId()
