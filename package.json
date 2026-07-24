@@ -6,7 +6,8 @@
     "dev": "next dev --turbopack -p 4101",
     "build": "next build",
     "start": "next start -p 4101",
-    "type-check": "tsc --noEmit"
+    "type-check": "tsc --noEmit",
+    "lint": "eslint ."
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.81",
@@ -23,9 +24,12 @@
   },
   "devDependencies": {
     "@ai4u-labs/changelog-client": "^0.3.0",
+    "@eslint/eslintrc": "^3",
     "@types/node": "^22",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "^15.3.2",
     "typescript": "^5"
   }
 }
